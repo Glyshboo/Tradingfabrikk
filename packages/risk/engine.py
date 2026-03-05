@@ -25,8 +25,10 @@ class RiskEngine:
         account: AccountState,
         snapshots: Dict[str, MarketSnapshot],
     ) -> RiskResult:
-        if self.safe_pause:
+        if self.safe_pause and not order.reduce_only:
             return RiskResult(False, "safe_pause")
+        if self.safe_pause and order.reduce_only:
+            return RiskResult(True, "safe_pause_reduce_only", reduce_only=True)
         if not account.known:
             return RiskResult(False, "unknown_account_state")
         if self._killswitch(account):

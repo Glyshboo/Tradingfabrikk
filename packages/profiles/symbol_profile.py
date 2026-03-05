@@ -36,3 +36,17 @@ class SymbolProfileManager:
             p.updated_ts = now
             self.profiles[sym] = p
         self._last = now
+
+
+def effective_backtest_costs(
+    profile: SymbolProfile | None,
+    base_fee_bps: float = 4.0,
+    base_slippage_bps: float = 2.0,
+) -> tuple[float, float]:
+    if profile is None:
+        return base_fee_bps, base_slippage_bps
+
+    liquidity_penalty = max(0.0, 1.0 - profile.liquidity_signature) * 4.0
+    fee_bps = base_fee_bps + liquidity_penalty
+    slippage_bps = base_slippage_bps + max(0.0, profile.slippage_proxy) * 10000
+    return fee_bps, slippage_bps

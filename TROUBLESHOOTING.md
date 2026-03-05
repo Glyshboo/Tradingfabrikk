@@ -12,6 +12,7 @@
 - Forventet adferd: fail-closed (pause + reduce-only), ingen nye risikofylte entries.
 - Tiltak:
   - Restart paper/live runner når stream er stabil.
+  - Hvis logger viser `market_stream_drop` med `[Errno 101] Network is unreachable` og `proxy_env_present=true`: verifiser `HTTP_PROXY`/`HTTPS_PROXY` og nettverkstilgang til Binance WS-endepunkt før restart.
   - Valider status med `scripts\05_status.bat`.
 
 ## Partial fills

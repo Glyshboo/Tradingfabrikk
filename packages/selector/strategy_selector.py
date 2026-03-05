@@ -34,6 +34,7 @@ class StrategySelector:
             regime=regime.value,
             eligible_strategies=[f"{c[0]}:{c[1]}" for c in candidates],
             score_breakdown=scores,
+            selected_candidate=selected_key,
             selected_strategy=strategy_name,
             selected_config=cfg_name,
             selected_side=sig.side,

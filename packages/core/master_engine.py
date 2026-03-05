@@ -92,7 +92,7 @@ class MasterEngine:
             await asyncio.sleep(self.cfg["engine"]["decision_interval_sec"])
 
     async def _execute_decision(self, decision: DecisionRecord) -> None:
-        side = "BUY" if decision.sizing["confidence"] >= 0.5 else "SELL"
+        side = decision.selected_side
         qty = max(0.0, self.cfg["sizing"]["base_qty"] * decision.sizing["confidence"])
         order = format_order(decision.symbol, side, qty)
         rr = self.risk.evaluate_order(order, self.account, self.data.market)

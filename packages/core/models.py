@@ -69,5 +69,6 @@ class DecisionRecord:
     score_breakdown: Dict[str, float]
     selected_strategy: str
     selected_config: str
+    selected_side: str
     sizing: Dict[str, float]
     blocked_reason: Optional[str] = None

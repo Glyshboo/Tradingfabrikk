@@ -1,0 +1,69 @@
+mode: paper
+symbols: ["BTCUSDT", "ETHUSDT", "SOLUSDT", "LINKUSDT"]
+
+account:
+  equity: 10000
+
+engine:
+  stale_after_sec: 15
+  decision_interval_sec: 2
+  profile_update_sec: 30
+
+sizing:
+  base_qty: 0.01
+
+risk:
+  max_daily_loss: 300
+  max_total_exposure_notional: 15000
+  max_leverage: 5
+  max_open_positions: 5
+  per_symbol_exposure_cap:
+    BTCUSDT: 8000
+    ETHUSDT: 6000
+    SOLUSDT: 3000
+    LINKUSDT: 2000
+  correlation_clusters:
+    high_corr_l1: ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
+  correlation_direction_cap: 2
+
+selector:
+  base_edge:
+    TrendCore: 0.08
+    RangeMR: 0.05
+
+strategy_configs:
+  TrendCore:
+    tc_safe:
+      atr_stop_mult: 2.0
+      time_stop_bars: 12
+      base_confidence: 0.58
+  RangeMR:
+    rmr_safe:
+      rsi_low: 35
+      rsi_high: 65
+      base_confidence: 0.52
+
+strategy_profiles:
+  BTCUSDT:
+    TREND_UP: [["TrendCore", "tc_safe"]]
+    TREND_DOWN: [["TrendCore", "tc_safe"]]
+    RANGE: [["RangeMR", "rmr_safe"]]
+  ETHUSDT:
+    TREND_UP: [["TrendCore", "tc_safe"]]
+    TREND_DOWN: [["TrendCore", "tc_safe"]]
+    RANGE: [["RangeMR", "rmr_safe"]]
+  SOLUSDT:
+    TREND_UP: [["TrendCore", "tc_safe"]]
+    TREND_DOWN: [["TrendCore", "tc_safe"]]
+    RANGE: [["RangeMR", "rmr_safe"]]
+  LINKUSDT:
+    TREND_UP: [["TrendCore", "tc_safe"]]
+    TREND_DOWN: [["TrendCore", "tc_safe"]]
+    RANGE: [["RangeMR", "rmr_safe"]]
+
+telemetry:
+  audit_db: runtime/audit.db
+  status_file: runtime/status.json
+
+logging:
+  level: INFO

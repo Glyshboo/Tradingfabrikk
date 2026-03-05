@@ -36,5 +36,6 @@ class StrategySelector:
             score_breakdown=scores,
             selected_strategy=strategy_name,
             selected_config=cfg_name,
+            selected_side=sig.side,
             sizing={"confidence": sig.confidence},
         )

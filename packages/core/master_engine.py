@@ -35,6 +35,7 @@ class MasterEngine:
             known=True,
         )
         self.strategies = {"TrendCore": TrendCore(), "RangeMR": RangeMR()}
+        self.last_decision: dict | None = None
 
     async def run(self) -> None:
         log_event("engine_start", {"mode": self.cfg["mode"]})
@@ -50,6 +51,7 @@ class MasterEngine:
             if not self.data.is_healthy():
                 self.risk.trigger_safe_pause()
                 log_event("safe_pause", {"reason": "data_or_user_stream_unhealthy"})
+                log_event("alert", {"severity": "warning", "message": "Data/User stream unhealthy -> trading paused (fail-closed)"})
                 self._write_status("SAFE_PAUSE")
                 await asyncio.sleep(1)
                 continue
@@ -74,6 +76,13 @@ class MasterEngine:
                 decision = self.selector.select(symbol, regime, candidates, cost_proxy, exposure_penalty=0.0)
                 if not decision:
                     continue
+                self.last_decision = {
+                    "symbol": decision.symbol,
+                    "regime": decision.regime,
+                    "strategy": decision.selected_strategy,
+                    "config": decision.selected_config,
+                    "score_breakdown": decision.score_breakdown,
+                }
                 await self._execute_decision(decision)
             self._write_status("RUNNING")
             await asyncio.sleep(self.cfg["engine"]["decision_interval_sec"])
@@ -110,8 +119,24 @@ class MasterEngine:
             {
                 "state": state,
                 "mode": self.cfg["mode"],
+                "symbols": self.cfg["symbols"],
+                "open_positions": {
+                    sym: {"qty": pos.qty, "entry_price": pos.entry_price}
+                    for sym, pos in self.account.positions.items()
+                    if abs(pos.qty) > 0
+                },
+                "last_decision": self.last_decision,
+                "ws_status": self.data.stream_health(),
                 "safe_pause": self.risk.safe_pause,
                 "reduce_only": self.risk.reduce_only_mode,
+                "risk_caps_status": {
+                    "daily_pnl": self.account.daily_pnl,
+                    "daily_loss_cap": self.cfg["risk"]["max_daily_loss"],
+                    "total_exposure_notional": self.risk._exposure(self.account, self.data.market),
+                    "total_exposure_cap": self.cfg["risk"]["max_total_exposure_notional"],
+                    "leverage": self.account.leverage,
+                    "max_leverage": self.cfg["risk"]["max_leverage"],
+                },
                 "ts": time.time(),
             },
         )

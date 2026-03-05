@@ -91,8 +91,10 @@ class RiskEngine:
             side = "SELL" if pos.qty > 0 else "BUY"
             await execution.place_order(OrderRequest(symbol=sym, side=side, qty=abs(pos.qty), reduce_only=True))
 
-    def trigger_safe_pause(self) -> None:
+    def trigger_safe_pause(self, reduce_only: bool = True) -> None:
         self.safe_pause = True
+        if reduce_only:
+            self.reduce_only_mode = True
 
     def clear_safe_pause(self) -> None:
         self.safe_pause = False

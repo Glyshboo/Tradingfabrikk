@@ -53,3 +53,11 @@ class DataManager:
         if time.time() - self.last_update_ts > self.stale_after_sec:
             return False
         return True
+
+    def stream_health(self) -> Dict[str, float | bool]:
+        return {
+            "market_fresh": (time.time() - self.last_update_ts) <= self.stale_after_sec,
+            "market_age_sec": max(0.0, time.time() - self.last_update_ts),
+            "user_stream_alive": self.user_stream_alive,
+            "stale_after_sec": self.stale_after_sec,
+        }

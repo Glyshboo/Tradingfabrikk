@@ -22,6 +22,25 @@ def test_data_manager_health_fail_closed_on_user_stream_down():
     assert dm.is_healthy() is False
 
 
+def test_data_manager_health_fail_closed_without_market_updates():
+    dm = DataManager(["BTCUSDT"], stale_after_sec=10)
+    dm.user_stream_alive = True
+    dm.market_stream_alive = True
+
+    assert dm.is_healthy() is False
+
+
+def test_stream_health_market_age_none_before_first_tick():
+    dm = DataManager(["BTCUSDT"], stale_after_sec=10)
+    dm.user_stream_alive = True
+    dm.market_stream_alive = True
+
+    health = dm.stream_health()
+
+    assert health["market_fresh"] is False
+    assert health["market_age_sec"] is None
+
+
 def test_trigger_safe_pause_enables_reduce_only_mode():
     risk = RiskEngine(_risk_cfg())
     risk.trigger_safe_pause()

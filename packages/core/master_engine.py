@@ -6,7 +6,7 @@ from typing import Dict
 
 from packages.core.models import AccountState, DecisionRecord, OrderRequest, PositionState
 from packages.data.data_manager import DataManager
-from packages.execution.adapters import ExecutionAdapter, format_order
+from packages.execution.adapters import BinanceRequestError, ExecutionAdapter, format_order
 from packages.profiles.symbol_profile import SymbolProfileManager
 from packages.risk.engine import RiskEngine
 from packages.selector.regime_engine import RegimeEngine
@@ -21,7 +21,11 @@ class MasterEngine:
     def __init__(self, cfg: dict, execution: ExecutionAdapter):
         self.cfg = cfg
         self.execution = execution
-        self.data = DataManager(cfg["symbols"], stale_after_sec=cfg["engine"]["stale_after_sec"])
+        self.data = DataManager(
+            cfg["symbols"],
+            stale_after_sec=cfg["engine"]["stale_after_sec"],
+            require_user_stream_auth=cfg.get("mode") == "live",
+        )
         self.risk = RiskEngine(cfg["risk"])
         self.regime = RegimeEngine()
         self.selector = StrategySelector(cfg["selector"]["base_edge"])
@@ -100,7 +104,24 @@ class MasterEngine:
                 await self.risk.panic_flatten(self.account, self.execution)
             return
         order.reduce_only = rr.reduce_only
-        res = await self.execution.place_order(order)
+        try:
+            res = await self.execution.place_order(order)
+        except BinanceRequestError as exc:
+            if exc.category in {"auth", "rate_limit", "server", "timeout", "network"}:
+                self.risk.trigger_safe_pause(reduce_only=True)
+            decision.blocked_reason = f"execution_error:{exc.category}"
+            self.audit.save_decision(decision)
+            log_event(
+                "execution_error",
+                {
+                    "symbol": decision.symbol,
+                    "error": str(exc),
+                    "error_category": exc.category,
+                    "safe_pause": self.risk.safe_pause,
+                    "reduce_only": self.risk.reduce_only_mode,
+                },
+            )
+            return
         self.audit.save_decision(decision)
         log_event(
             "order_submitted",

@@ -15,6 +15,12 @@
   - Hvis logger viser `market_stream_drop` med `[Errno 101] Network is unreachable` og `proxy_env_present=true`: verifiser `HTTP_PROXY`/`HTTPS_PROXY` og nettverkstilgang til Binance WS-endepunkt før restart.
   - Valider status med `scripts\05_status.bat`.
 
+## Rask smoke-test (paper + research)
+- Bruk disse kommandoene for å verifisere at appene starter uten å gå live:
+  - `python -m apps.paper_runner --config configs/active.yaml`
+  - `python -m apps.research_runner --config configs/active.yaml --space configs/research_space.yaml`
+- For paper-mode er `SAFE_PAUSE` forventet hvis datastream er utilgjengelig; dette er fail-closed og betyr at systemet ikke tar nye entries.
+
 ## Partial fills
 - Symptomer: delvis fylt ordre gir mismatch i forventet posisjon.
 - Tiltak:

@@ -25,10 +25,11 @@ class DataManager:
     ):
         self.symbols = [s.upper().replace("/", "") for s in symbols]
         self.market: Dict[str, MarketSnapshot] = {}
-        self.last_update_ts: float = 0.0
+        self.last_update_ts: float | None = None
         self.stale_after_sec = stale_after_sec
         self.user_stream_alive = False
         self.market_stream_alive = False
+        self._market_reconnect_delay_sec = 1
         self.api_key = api_key or os.getenv("BINANCE_API_KEY", "")
         self.rest_base_url = rest_base_url.rstrip("/")
         self.ws_base_url = ws_base_url.rstrip("/")
@@ -40,14 +41,23 @@ class DataManager:
             try:
                 async with websockets.connect(url, ping_interval=20, ping_timeout=10, close_timeout=5) as ws:
                     self.market_stream_alive = True
+                    self._market_reconnect_delay_sec = 1
                     async for message in ws:
                         now = time.time()
                         self._ingest_market_message(message, now)
                         self.last_update_ts = now
             except Exception as exc:
                 self.market_stream_alive = False
-                log_event("market_stream_drop", {"error": str(exc)})
-                await asyncio.sleep(1)
+                log_event(
+                    "market_stream_drop",
+                    {
+                        "error": str(exc),
+                        "reconnect_in_sec": self._market_reconnect_delay_sec,
+                        "proxy_env_present": bool(os.getenv("HTTPS_PROXY") or os.getenv("HTTP_PROXY")),
+                    },
+                )
+                await asyncio.sleep(self._market_reconnect_delay_sec)
+                self._market_reconnect_delay_sec = min(30, self._market_reconnect_delay_sec * 2)
 
     async def run_user_stream(self) -> None:
         if not self.api_key and not self.require_user_stream_auth:
@@ -147,15 +157,18 @@ class DataManager:
             return False
         if not self.market_stream_alive:
             return False
+        if self.last_update_ts is None:
+            return False
         if time.time() - self.last_update_ts > self.stale_after_sec:
             return False
         return True
 
-    def stream_health(self) -> Dict[str, float | bool]:
+    def stream_health(self) -> Dict[str, float | bool | None]:
+        market_age_sec = None if self.last_update_ts is None else max(0.0, time.time() - self.last_update_ts)
         return {
             "market_stream_alive": self.market_stream_alive,
-            "market_fresh": (time.time() - self.last_update_ts) <= self.stale_after_sec,
-            "market_age_sec": max(0.0, time.time() - self.last_update_ts),
+            "market_fresh": market_age_sec is not None and market_age_sec <= self.stale_after_sec,
+            "market_age_sec": market_age_sec,
             "user_stream_alive": self.user_stream_alive,
             "stale_after_sec": self.stale_after_sec,
         }

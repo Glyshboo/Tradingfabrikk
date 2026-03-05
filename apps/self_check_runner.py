@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import sys
 
 from packages.core.config import load_config
 from packages.core.models import AccountState, OrderRequest, PositionState
@@ -63,7 +64,7 @@ async def run_self_check(config_path: str) -> dict:
     )
     await risk_flatten.panic_flatten(flatten_account, execution)
 
-    return {
+    results = {
         "daily_loss_cap": {"allowed": daily_loss_result.allowed, "reason": daily_loss_result.reason},
         "max_exposure_cap": {"allowed": exposure_result.allowed, "reason": exposure_result.reason},
         "panic_flatten": {
@@ -76,6 +77,24 @@ async def run_self_check(config_path: str) -> dict:
             "panic_flatten_reduce_only": True,
         },
     }
+    checks = {
+        "daily_loss_cap": (
+            results["daily_loss_cap"]["allowed"] is False
+            and results["daily_loss_cap"]["reason"] == results["expected"]["daily_loss_cap_reason"]
+        ),
+        "max_exposure_cap": (
+            results["max_exposure_cap"]["allowed"] is False
+            and results["max_exposure_cap"]["reason"] == results["expected"]["max_exposure_cap_reason"]
+        ),
+        "panic_flatten_reduce_only": (
+            bool(results["panic_flatten"]["orders"])
+            and all(order.get("reduceOnly") is True for order in results["panic_flatten"]["orders"])
+            and results["expected"]["panic_flatten_reduce_only"] is True
+        ),
+    }
+    results["checks"] = checks
+    results["ok"] = all(checks.values())
+    return results
 
 
 def main() -> None:
@@ -84,6 +103,8 @@ def main() -> None:
     args = parser.parse_args()
     output = asyncio.run(run_self_check(args.config))
     print(json.dumps(output, indent=2))
+    if not output.get("ok", False):
+        sys.exit(1)
 
 
 if __name__ == "__main__":

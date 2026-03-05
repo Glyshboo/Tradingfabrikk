@@ -57,7 +57,7 @@ Status:
 python -m apps.status_tool --status-file runtime/status.json
 ```
 
-Guardrail self-check:
+Guardrail self-check (returnerer exit code 1 hvis en guardrail-check feiler):
 ```bash
 python -m apps.self_check_runner --config configs/active.yaml
 ```

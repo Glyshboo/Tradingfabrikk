@@ -61,3 +61,32 @@ class DataManager:
             "user_stream_alive": self.user_stream_alive,
             "stale_after_sec": self.stale_after_sec,
         }
+
+    def load_historical_prices(
+        self,
+        symbol: str,
+        regime: str,
+        start_ts: int | None = None,
+        end_ts: int | None = None,
+        bars: int = 400,
+    ) -> list[float]:
+        if symbol not in self.symbols:
+            return []
+        if bars < 3:
+            return []
+
+        seed = hash((symbol, regime, start_ts, end_ts)) & 0xFFFFFFFF
+        rng = random.Random(seed)
+        base_price = 100.0 + (abs(hash(symbol)) % 200)
+        regime_drift = {
+            "TREND_UP": 0.18,
+            "TREND_DOWN": -0.18,
+            "RANGE": 0.0,
+        }.get(regime, 0.0)
+
+        prices = [base_price]
+        for _ in range(1, bars):
+            drift = regime_drift + rng.uniform(-0.12, 0.12)
+            next_px = max(0.1, prices[-1] + drift)
+            prices.append(next_px)
+        return prices

@@ -76,13 +76,7 @@ class MasterEngine:
                 decision = self.selector.select(symbol, regime, candidates, cost_proxy, exposure_penalty=0.0)
                 if not decision:
                     continue
-                self.last_decision = {
-                    "symbol": decision.symbol,
-                    "regime": decision.regime,
-                    "strategy": decision.selected_strategy,
-                    "config": decision.selected_config,
-                    "score_breakdown": decision.score_breakdown,
-                }
+                self.last_decision = decision.as_audit_payload()
                 await self._execute_decision(decision)
             self._write_status("RUNNING")
             await asyncio.sleep(self.cfg["engine"]["decision_interval_sec"])
@@ -90,28 +84,29 @@ class MasterEngine:
     async def _execute_decision(self, decision: DecisionRecord) -> None:
         side = "BUY" if decision.sizing["confidence"] >= 0.5 else "SELL"
         qty = max(0.0, self.cfg["sizing"]["base_qty"] * decision.sizing["confidence"])
+        decision.side = side
+        decision.qty = qty
         order = format_order(decision.symbol, side, qty)
         rr = self.risk.evaluate_order(order, self.account, self.data.market)
+        decision.caps_status = {
+            "safe_pause": self.risk.safe_pause,
+            "reduce_only_mode": self.risk.reduce_only_mode,
+            "risk_result": rr.reason,
+        }
         if not rr.allowed:
             decision.blocked_reason = rr.reason
             self.audit.save_decision(decision)
-            log_event("decision_blocked", {"symbol": decision.symbol, "reason": rr.reason})
+            log_event("decision_blocked", decision.as_audit_payload())
             if rr.reason == "kill_switch_triggered":
                 await self.risk.panic_flatten(self.account, self.execution)
             return
         order.reduce_only = rr.reduce_only
         res = await self.execution.place_order(order)
         self.audit.save_decision(decision)
-        log_event(
-            "order_submitted",
-            {
-                "symbol": decision.symbol,
-                "strategy": decision.selected_strategy,
-                "config": decision.selected_config,
-                "score_breakdown": decision.score_breakdown,
-                "result": res,
-            },
-        )
+        payload = decision.as_audit_payload()
+        payload["caps_status"]["reduce_only_order"] = order.reduce_only
+        payload["result"] = res
+        log_event("order_submitted", payload)
 
     def _write_status(self, state: str) -> None:
         write_status(

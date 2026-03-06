@@ -7,14 +7,19 @@ from dataclasses import dataclass
 
 
 STATES = [
-    "candidate",
+    "idea_proposed",
+    "config_generated",
+    "validation_failed",
     "backtest_pass",
-    "oos_pass",
-    "paper_pass",
+    "paper_smoke_running",
+    "paper_smoke_pass",
     "ready_for_review",
-    "paper_hold",
-    "micro_live",
-    "live_approved",
+    "approved_for_micro_live",
+    "micro_live_active",
+    "micro_live_paused",
+    "micro_live_recovering",
+    "micro_live_resumed",
+    "approved_for_live_full",
     "rejected",
 ]
 STATE_ORDER = {name: idx for idx, name in enumerate(STATES)}
@@ -47,21 +52,32 @@ class CandidateRegistry:
         now = time.time()
         row.update(
             {
-                "state": "candidate",
+                "state": "idea_proposed",
                 "score": score,
                 "meta": meta,
+                "type": meta.get("candidate_type", "config"),
                 "track": meta.get("track", "fast"),
+                "provider": meta.get("provider_used", "unknown"),
+                "strategy_family": meta.get("strategy_family"),
+                "symbols": meta.get("symbols") or ([meta["symbol"]] if meta.get("symbol") else []),
+                "regimes": meta.get("regimes") or ([meta["regime"]] if meta.get("regime") else []),
                 "artifacts": {
                     "summary": meta.get("summary"),
                     "backtest_result": meta.get("backtest_result"),
+                    "oos_result": meta.get("oos_result"),
                     "paper_smoke_result": meta.get("paper_smoke_result"),
                     "config_patch": meta.get("config_patch"),
+                    "code_patch_summary": meta.get("code_patch_summary"),
                     "risk_notes": meta.get("risk_notes"),
                     "provider_used": meta.get("provider_used"),
+                    "validation_report": meta.get("validation_report"),
+                    "warnings": meta.get("warnings", []),
+                    "recommendation": meta.get("recommendation"),
+                    "artifact_bundle": meta.get("artifact_bundle"),
                     "code_change": bool(meta.get("code_change", False)),
                 },
                 "updated_ts": now,
-                "history": row.get("history", []) + [{"state": "candidate", "ts": now}],
+                "history": row.get("history", []) + [{"state": "idea_proposed", "ts": now}],
             }
         )
         data["candidates"][candidate_id] = row
@@ -72,8 +88,8 @@ class CandidateRegistry:
             raise ValueError(f"invalid state {state}")
         data = self._load()
         if candidate_id in data["candidates"]:
-            current_state = data["candidates"][candidate_id].get("state", "candidate")
-            if state in {"rejected", "paper_hold", "micro_live", "live_approved"}:
+            current_state = data["candidates"][candidate_id].get("state", "idea_proposed")
+            if state in {"rejected", "validation_failed", "micro_live_paused"}:
                 pass
             elif STATE_ORDER[state] < STATE_ORDER.get(current_state, 0):
                 raise ValueError(f"invalid backward transition {current_state} -> {state}")
@@ -99,8 +115,23 @@ class CandidateRegistry:
             if row["state"] in counts:
                 counts[row["state"]] += 1
         newest = sorted(
-            [{"id": cid, "state": row.get("state"), "score": row.get("score"), "updated_ts": row.get("updated_ts"), "track": row.get("track", "fast")} for cid, row in data["candidates"].items()],
+            [{
+                "id": cid,
+                "state": row.get("state"),
+                "score": row.get("score"),
+                "updated_ts": row.get("updated_ts"),
+                "track": row.get("track", "fast"),
+                "type": row.get("type", "config"),
+                "provider": row.get("provider", "unknown"),
+            } for cid, row in data["candidates"].items()],
             key=lambda x: x.get("updated_ts") or 0,
             reverse=True,
         )[:10]
         return {"counts": counts, "total": len(data["candidates"]), "latest": newest}
+
+    def get(self, candidate_id: str) -> dict | None:
+        data = self._load()
+        row = data["candidates"].get(candidate_id)
+        if row is None:
+            return None
+        return {"id": candidate_id, **row}

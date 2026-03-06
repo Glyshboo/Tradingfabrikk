@@ -10,7 +10,7 @@ from packages.review.review_queue import ReviewQueue
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Unified review entrypoint")
-    parser.add_argument("--action", choices=["list", "approve", "reject", "hold", "micro_live"], default="list")
+    parser.add_argument("--action", choices=["list", "approve_micro_live", "approve_live_full", "reject", "hold", "keep_paper"], default="list")
     parser.add_argument("--candidate-id", default="")
     parser.add_argument("--note", default="")
     args = parser.parse_args()
@@ -26,11 +26,24 @@ def main() -> None:
     if not args.candidate_id:
         raise SystemExit("--candidate-id is required for non-list actions")
 
+    record = registry.get(args.candidate_id)
+    if record is None:
+        raise SystemExit(f"candidate not found in registry: {args.candidate_id}")
+    if args.action == "approve_live_full" and record.get("state") not in {
+        "approved_for_micro_live",
+        "micro_live_active",
+        "micro_live_resumed",
+    }:
+        raise SystemExit("approve_live_full is only allowed after micro-live state")
+    if record.get("type") in {"risk", "execution", "code"} and record.get("track") != "strict":
+        raise SystemExit("protected candidate types must remain on strict track")
+
     result = queue.apply_action(args.candidate_id, args.action, args.note)
     mapping = {
-        "approve": "live_approved",
-        "micro_live": "micro_live",
-        "hold": "paper_hold",
+        "approve_micro_live": "approved_for_micro_live",
+        "approve_live_full": "approved_for_live_full",
+        "hold": "paper_smoke_running",
+        "keep_paper": "paper_smoke_running",
         "reject": "rejected",
     }
     registry.transition(args.candidate_id, mapping[args.action])

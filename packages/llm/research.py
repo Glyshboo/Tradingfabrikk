@@ -21,14 +21,17 @@ class LLMResearchService:
             return AnthropicProvider(self.cfg.get("anthropic_model", "claude-3-5-sonnet-latest"))
         raise ValueError(f"unsupported provider: {name}")
 
-    def research(self, prompt: str) -> dict:
+    def research(self, prompt: str, bundle: dict | None = None) -> dict:
         primary = self.cfg.get("provider", "openai")
         fallback = self.cfg.get("fallback_provider", "anthropic")
         errors = []
         response: LLMResponse | None = None
         for provider_name in [primary, fallback]:
             try:
-                response = self._provider(provider_name).run_research(prompt)
+                final_prompt = prompt
+                if bundle:
+                    final_prompt = f"{prompt}\n\nResearch bundle:\n{json.dumps(bundle, indent=2)[:12000]}"
+                response = self._provider(provider_name).run_research(final_prompt)
                 break
             except Exception as exc:
                 errors.append({"provider": provider_name, "error": str(exc)})
@@ -42,6 +45,7 @@ class LLMResearchService:
             "provider": response.provider,
             "errors": errors,
             "summary": response.summary,
+            "bundle": bundle or {},
             "allowed_outputs": [
                 "research summaries",
                 "diagnosis",

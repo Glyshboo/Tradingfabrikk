@@ -27,7 +27,7 @@ Windows:
 scripts\02_paper.bat
 ```
 
-Sjekk status (mode, symbols, open positions, last decision, ws status, risk caps):
+Sjekk status (mode, symbols, open positions, last decision, ws status, account sync health, regime per symbol, risk caps):
 ```bat
 scripts\05_status.bat
 ```
@@ -52,9 +52,29 @@ Research/backtest (egen prosess):
 python -m apps.research_runner --config configs/active.yaml --space configs/research_space.yaml
 ```
 
+Research/backtest henter nå Binance historical klines og cacher automatisk i `runtime/data_cache/`.
+Hvis Binance-data ikke er tilgjengelig, stopper research/backtest for den symbol/regime-bøtten (fail-closed, ingen syntetisk fallback).
+Candidate-pipeline lagres i `runtime/candidates_registry.json` med states:
+`candidate -> backtest_pass -> paper_pass -> ready_for_review -> live_approved`.
+
 Status:
 ```bash
 python -m apps.status_tool --status-file runtime/status.json
+```
+
+Candidate status:
+```bash
+python -m apps.candidate_status_tool --registry runtime/candidates_registry.json
+```
+
+Candidate paper evaluation update (manuell, ingen auto-live):
+```bash
+python -m apps.candidate_status_tool --registry runtime/candidates_registry.json --paper-eval-id <candidate_id> --paper-eval-passed true --paper-eval-pnl 120.5 --paper-eval-max-dd 15.2 --paper-eval-notes "stable"
+```
+
+Manuell `live_approved` overgang krever eksplisitt flagg (sikkerhetsvern):
+```bash
+python -m apps.candidate_status_tool --registry runtime/candidates_registry.json --transition-id <candidate_id> --transition-state live_approved --allow-live-approved
 ```
 
 Guardrail self-check (returnerer exit code 1 hvis en guardrail-check feiler):
@@ -81,6 +101,7 @@ python -m apps.self_check_runner --config configs/active.yaml
 - `scripts/04_all.bat`
 - `scripts/05_status.bat`
 - `scripts/06_self_check.bat`
+- `scripts/07_candidate_status.bat`
 - `scripts/99_stop_all.bat`
 
 ## Runbooks

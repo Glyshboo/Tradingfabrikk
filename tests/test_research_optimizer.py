@@ -1,10 +1,21 @@
 from pathlib import Path
 
+from packages.data.data_manager import DataManager
 from packages.profiles.symbol_profile import SymbolProfile
 from packages.research.optimizer import ResearchOptimizer
 
 
-def test_random_search_creates_candidates_per_symbol(tmp_path):
+def _fake_klines(limit: int) -> list[list[str | int]]:
+    rows = []
+    price = 100.0
+    for i in range(limit):
+        price += 0.5
+        rows.append([i, str(price - 0.2), str(price + 0.2), str(price - 0.4), str(price)])
+    return rows
+
+
+def test_random_search_creates_candidates_per_symbol(tmp_path, monkeypatch):
+    monkeypatch.setattr(DataManager, "_download_klines", lambda self, *args, **kwargs: _fake_klines(kwargs.get("limit", 60)))
     out_dir = tmp_path / "candidates"
     optimizer = ResearchOptimizer(out_dir=str(out_dir), seed=1)
     search_space = {
@@ -29,7 +40,8 @@ def test_random_search_creates_candidates_per_symbol(tmp_path):
     assert Path(out_dir / "ranking.yaml").exists()
 
 
-def test_random_search_score_changes_with_cost_model(tmp_path):
+def test_random_search_score_changes_with_cost_model(tmp_path, monkeypatch):
+    monkeypatch.setattr(DataManager, "_download_klines", lambda self, *args, **kwargs: _fake_klines(kwargs.get("limit", 80)))
     search_space = {
         "atr_stop_mult": [2.0],
         "time_stop_bars": [12],

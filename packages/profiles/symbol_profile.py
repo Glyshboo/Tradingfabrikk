@@ -22,17 +22,19 @@ class SymbolProfileManager:
         self._last = 0.0
         self.profiles: Dict[str, SymbolProfile] = {}
 
-    def maybe_update(self, snapshots: Dict[str, MarketSnapshot]) -> None:
+    def maybe_update(self, snapshots: Dict[str, MarketSnapshot], funding_rates: Dict[str, float] | None = None) -> None:
         now = time.time()
         if now - self._last < self.interval_sec:
             return
         for sym, snap in snapshots.items():
             spread = (snap.ask - snap.bid) / max(snap.price, 1e-9)
+            atr_ratio = (snap.atr or 0.0) / max(snap.price, 1e-9)
             p = self.profiles.get(sym, SymbolProfile())
-            p.vol_signature = snap.atr or p.vol_signature
-            p.liquidity_signature = max(0.0, 1.0 - spread * 1000)
-            p.slippage_proxy = spread * 0.5
-            p.funding_behavior = p.funding_behavior
+            # smoother volatility signature to avoid profile jitter
+            p.vol_signature = round(0.6 * p.vol_signature + 0.4 * atr_ratio, 8)
+            p.liquidity_signature = max(0.0, min(1.0, 1.0 - spread * 1500))
+            p.slippage_proxy = max(0.0, spread * (0.35 + atr_ratio * 5.0))
+            p.funding_behavior = float((funding_rates or {}).get(sym, p.funding_behavior))
             p.updated_ts = now
             self.profiles[sym] = p
         self._last = now

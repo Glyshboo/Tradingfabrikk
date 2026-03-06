@@ -158,6 +158,7 @@ class MasterEngine:
                 side,
                 qty,
                 fill_price,
+codex/close-the-gap-to-production-ready-architecture-h2uz9x
                     {
                         "stop_price": decision.sizing.get("stop_price"),
                         "take_profit": decision.sizing.get("take_profit"),
@@ -165,6 +166,14 @@ class MasterEngine:
                         "trail_mult": decision.sizing.get("trail_mult", 1.5),
                     },
                 )
+=======
+                {
+                    "stop_price": decision.sizing.get("stop_price"),
+                    "take_profit": decision.sizing.get("take_profit"),
+                    "time_stop_bars": decision.sizing.get("time_stop_bars", 0),
+                },
+            )
+main
 
     async def _submit_exit(self, symbol: str, reason: str) -> None:
         pos = self.account.positions.get(symbol)

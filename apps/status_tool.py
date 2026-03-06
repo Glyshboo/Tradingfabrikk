@@ -4,6 +4,8 @@ import argparse
 import json
 import pathlib
 
+from packages.research.candidate_registry import CandidateRegistry
+
 
 def main() -> None:
     parser = argparse.ArgumentParser()
@@ -22,11 +24,15 @@ def main() -> None:
         "eligible_strategies": last_decision.get("eligible_strategies", []),
         "score_breakdown": last_decision.get("score_breakdown", {}),
         "selected_candidate": last_decision.get("selected_candidate"),
+        "selected_side": last_decision.get("selected_side"),
         "side": last_decision.get("side"),
         "qty": last_decision.get("qty"),
+        "score_components": last_decision.get("score_components", {}),
         "blocked_reason": last_decision.get("blocked_reason"),
         "caps_status": last_decision.get("caps_status", {}),
     }
+
+    candidate_report = CandidateRegistry().report()
 
     view = {
         "mode": status.get("mode"),
@@ -40,6 +46,7 @@ def main() -> None:
         "risk_caps_status": status.get("risk_caps_status", {}),
         "safe_pause": status.get("safe_pause"),
         "reduce_only": status.get("reduce_only"),
+        "candidate_registry": candidate_report,
         "ts": status.get("ts"),
     }
     print(json.dumps(view, indent=2))

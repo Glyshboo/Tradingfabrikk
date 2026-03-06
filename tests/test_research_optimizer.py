@@ -4,7 +4,7 @@ from packages.profiles.symbol_profile import SymbolProfile
 from packages.research.optimizer import ResearchOptimizer
 
 
-def test_random_search_creates_candidates_per_symbol(tmp_path):
+def test_random_search_creates_candidates_per_symbol(tmp_path, monkeypatch):
     out_dir = tmp_path / "candidates"
     optimizer = ResearchOptimizer(out_dir=str(out_dir), seed=1)
     search_space = {
@@ -13,6 +13,11 @@ def test_random_search_creates_candidates_per_symbol(tmp_path):
         "base_confidence": [0.58],
         "bars": 60,
     }
+
+    synthetic_rows = [[i, "1", "2", "0.5", str(100 + i)] for i in range(80)]
+    from packages.data.data_manager import DataManager
+
+    monkeypatch.setattr(DataManager, "_download_klines", lambda *args, **kwargs: synthetic_rows)
 
     ranking = optimizer.random_search(
         search_space,
@@ -29,13 +34,18 @@ def test_random_search_creates_candidates_per_symbol(tmp_path):
     assert Path(out_dir / "ranking.yaml").exists()
 
 
-def test_random_search_score_changes_with_cost_model(tmp_path):
+def test_random_search_score_changes_with_cost_model(tmp_path, monkeypatch):
     search_space = {
         "atr_stop_mult": [2.0],
         "time_stop_bars": [12],
         "base_confidence": [0.58],
         "bars": 80,
     }
+
+    synthetic_rows = [[i, "1", "2", "0.5", str(100 + i)] for i in range(120)]
+    from packages.data.data_manager import DataManager
+
+    monkeypatch.setattr(DataManager, "_download_klines", lambda *args, **kwargs: synthetic_rows)
 
     low_cost_optimizer = ResearchOptimizer(out_dir=str(tmp_path / "low"), seed=2)
     low_cost_ranking = low_cost_optimizer.random_search(

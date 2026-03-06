@@ -30,5 +30,6 @@
 ## Operasjonell drift
 - Følg status via `scripts\05_status.bat`.
 - Verifiser `account_sync_health.last_event_age_sec` og `current_regime` før du tillater nye entries.
+- Verifiser at `last_decision.score_components` finnes for forklarbar strategi-score og at `candidate_registry` viser forventet state-fordeling.
 - Hvis ws/user stream er ustabil: hold system i pause (fail-closed) til feed er stabil.
 - Bruk `scripts\99_stop_all.bat` for rask stopp av runner-vinduer.

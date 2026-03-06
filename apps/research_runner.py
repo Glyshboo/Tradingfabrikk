@@ -65,7 +65,8 @@ def main() -> None:
         or space.get("strategy_families")
         or list(active_cfg.get("strategy_configs", {}).keys())
     )
-    ideas = StrategyIdeaLibrary().report()
+    ideas_dir = (active_cfg.get("bootstrap") or {}).get("strategy_idea_library_dir", "strategy_ideas")
+    ideas = StrategyIdeaLibrary(ideas_dir).report()
     implemented_idea_families = sorted({row.get("family") for row in ideas.get("implemented_plugins", []) if row.get("family")})
     if not args.strategy_families and implemented_idea_families:
         strategy_families = [fam for fam in strategy_families if fam in implemented_idea_families] or implemented_idea_families
@@ -130,6 +131,8 @@ def main() -> None:
                         "generated_ts": time.time(),
                         "bundle_source": "research_runner",
                         "idea_library_id": row.get("idea_id"),
+                        "idea_priority_hint": row.get("idea_priority_hint"),
+                        "idea_strict_track_required": row.get("idea_strict_track_required", False),
                     },
                     indent=2,
                 ),

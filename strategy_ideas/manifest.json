@@ -1,0 +1,198 @@
+{
+  "version": 1,
+  "library": "strategy_ideas",
+  "description": "Seed strategy idea library for research/paper workflows. Ideas are not auto-live strategies.",
+  "idea_count": 21,
+  "updated_by": "codex",
+  "ideas": [
+    {
+      "id": "idea_trend_ema_crossover",
+      "name": "EMA Crossover Trend Follow",
+      "family": "TrendCore",
+      "implementation_status": "implemented_plugin",
+      "mapped_plugin": "TrendCore",
+      "priority_hint": "high",
+      "strict_track_required": false
+    },
+    {
+      "id": "idea_ema_pullback_continuation",
+      "name": "EMA Pullback Continuation",
+      "family": "TrendCore",
+      "implementation_status": "implemented_plugin",
+      "mapped_plugin": "TrendCore",
+      "priority_hint": "high",
+      "strict_track_required": false
+    },
+    {
+      "id": "idea_atr_trend_continuation",
+      "name": "ATR Trend Continuation",
+      "family": "TrendCore",
+      "implementation_status": "partially_implemented",
+      "mapped_plugin": "TrendCore",
+      "priority_hint": "medium",
+      "strict_track_required": true
+    },
+    {
+      "id": "idea_donchian_breakout_trend",
+      "name": "Donchian Breakout Trend-Following",
+      "family": "DonchianBreakout",
+      "implementation_status": "idea_only",
+      "mapped_plugin": null,
+      "priority_hint": "high",
+      "strict_track_required": true
+    },
+    {
+      "id": "idea_volatility_squeeze_breakout",
+      "name": "Volatility Squeeze Breakout",
+      "family": "SqueezeBreakout",
+      "implementation_status": "idea_only",
+      "mapped_plugin": null,
+      "priority_hint": "high",
+      "strict_track_required": true
+    },
+    {
+      "id": "idea_range_breakout_retest",
+      "name": "Range Breakout + Retest",
+      "family": "ChannelRetest",
+      "implementation_status": "idea_only",
+      "mapped_plugin": null,
+      "priority_hint": "medium",
+      "strict_track_required": true
+    },
+    {
+      "id": "idea_channel_breakout_continuation",
+      "name": "Channel Breakout Continuation",
+      "family": "ChannelBreakout",
+      "implementation_status": "idea_only",
+      "mapped_plugin": null,
+      "priority_hint": "medium",
+      "strict_track_required": true
+    },
+    {
+      "id": "idea_opening_range_breakout",
+      "name": "Opening Range Breakout Concept",
+      "family": "OpeningRangeBreakout",
+      "implementation_status": "idea_only",
+      "mapped_plugin": null,
+      "priority_hint": "low",
+      "strict_track_required": true
+    },
+    {
+      "id": "idea_rsi_mean_reversion",
+      "name": "RSI Mean Reversion",
+      "family": "RangeMR",
+      "implementation_status": "implemented_plugin",
+      "mapped_plugin": "RangeMR",
+      "priority_hint": "high",
+      "strict_track_required": false
+    },
+    {
+      "id": "idea_bollinger_mean_reversion",
+      "name": "Bollinger Band Mean Reversion",
+      "family": "RangeMR",
+      "implementation_status": "partially_implemented",
+      "mapped_plugin": "RangeMR",
+      "priority_hint": "medium",
+      "strict_track_required": true
+    },
+    {
+      "id": "idea_vwap_reversion",
+      "name": "VWAP Reversion Concept",
+      "family": "VWAPReversion",
+      "implementation_status": "idea_only",
+      "mapped_plugin": null,
+      "priority_hint": "medium",
+      "strict_track_required": true
+    },
+    {
+      "id": "idea_zscore_reversion",
+      "name": "Z-Score Reversion Concept",
+      "family": "ZScoreMR",
+      "implementation_status": "idea_only",
+      "mapped_plugin": null,
+      "priority_hint": "medium",
+      "strict_track_required": true
+    },
+    {
+      "id": "idea_momentum_continuation",
+      "name": "Momentum Continuation",
+      "family": "MomentumContinuation",
+      "implementation_status": "idea_only",
+      "mapped_plugin": null,
+      "priority_hint": "high",
+      "strict_track_required": true
+    },
+    {
+      "id": "idea_breakout_momentum_confirmation",
+      "name": "Breakout + Momentum Confirmation",
+      "family": "MomentumBreakout",
+      "implementation_status": "idea_only",
+      "mapped_plugin": null,
+      "priority_hint": "high",
+      "strict_track_required": true
+    },
+    {
+      "id": "idea_trend_acceleration_after_consolidation",
+      "name": "Trend Acceleration After Consolidation",
+      "family": "AccelerationBreakout",
+      "implementation_status": "idea_only",
+      "mapped_plugin": null,
+      "priority_hint": "medium",
+      "strict_track_required": true
+    },
+    {
+      "id": "idea_pullback_momentum_reentry",
+      "name": "Pullback + Momentum Re-entry",
+      "family": "PullbackMomentum",
+      "implementation_status": "idea_only",
+      "mapped_plugin": null,
+      "priority_hint": "medium",
+      "strict_track_required": true
+    },
+    {
+      "id": "idea_trend_only_in_trend_regime",
+      "name": "Trend-Only in Trend Regime",
+      "family": "RegimeFilteredTrend",
+      "implementation_status": "partially_implemented",
+      "mapped_plugin": null,
+      "priority_hint": "high",
+      "strict_track_required": true
+    },
+    {
+      "id": "idea_mr_only_in_range_regime",
+      "name": "Mean-Reversion Only in Range Regime",
+      "family": "RegimeFilteredMR",
+      "implementation_status": "partially_implemented",
+      "mapped_plugin": null,
+      "priority_hint": "high",
+      "strict_track_required": true
+    },
+    {
+      "id": "idea_volatility_filter_risk_off_overlay",
+      "name": "Volatility Filter / Risk-Off Overlay",
+      "family": "RiskOverlay",
+      "implementation_status": "partially_implemented",
+      "mapped_plugin": null,
+      "priority_hint": "high",
+      "strict_track_required": true
+    },
+    {
+      "id": "idea_trend_range_hybrid_selector",
+      "name": "Trend + Range Hybrid Selector",
+      "family": "HybridSelector",
+      "implementation_status": "partially_implemented",
+      "mapped_plugin": null,
+      "priority_hint": "high",
+      "strict_track_required": true
+    },
+    {
+      "id": "idea_cross_symbol_momentum_rotation",
+      "name": "Cross-Symbol Momentum Rotation",
+      "family": "MomentumRotation",
+      "implementation_status": "idea_only",
+      "mapped_plugin": null,
+      "priority_hint": "low",
+      "strict_track_required": true
+    }
+  ]
+}

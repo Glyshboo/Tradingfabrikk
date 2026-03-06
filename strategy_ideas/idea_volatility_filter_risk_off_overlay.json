@@ -1,0 +1,58 @@
+{
+  "id": "idea_volatility_filter_risk_off_overlay",
+  "name": "Volatility Filter / Risk-Off Overlay",
+  "family": "RiskOverlay",
+  "description": "Reduce or disable entries during volatility shock / liquidity stress windows.",
+  "typical_market_regimes": [
+    "RANGE",
+    "TREND_UP",
+    "TREND_DOWN"
+  ],
+  "common_indicators": [
+    "ATR",
+    "Spread",
+    "Funding",
+    "OrderbookImbalance"
+  ],
+  "tunable_parameters": {
+    "atr_shock_threshold": [
+      2.0,
+      2.5,
+      3.0
+    ],
+    "spread_guard_bps": [
+      5,
+      8,
+      12
+    ],
+    "risk_multiplier": [
+      0.0,
+      0.3,
+      0.5
+    ]
+  },
+  "symbol_fit_notes": "Portfolio wide overlay, especially for thin alt symbols.",
+  "known_strengths": [
+    "drawdown control"
+  ],
+  "known_weaknesses": [
+    "can suppress profitable trades"
+  ],
+  "implementation_status": "partially_implemented",
+  "source_type": "seed",
+  "strict_track_required": true,
+  "priority_hint": "high",
+  "default_timeframes": [
+    "5m",
+    "15m",
+    "1h"
+  ],
+  "fee_sensitivity": "low",
+  "slippage_sensitivity": "high",
+  "funding_sensitivity": "medium",
+  "implementation_notes": "Risk engine has guardrails; this idea is strategy-level gating extension.",
+  "tags": [
+    "risk_overlay",
+    "regime"
+  ]
+}

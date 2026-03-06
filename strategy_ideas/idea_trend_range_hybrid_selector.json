@@ -1,0 +1,57 @@
+{
+  "id": "idea_trend_range_hybrid_selector",
+  "name": "Trend + Range Hybrid Selector",
+  "family": "HybridSelector",
+  "description": "Dynamically allocate between trend and MR candidates by regime confidence and recent fit.",
+  "typical_market_regimes": [
+    "RANGE",
+    "TREND_UP",
+    "TREND_DOWN"
+  ],
+  "common_indicators": [
+    "RegimeScore",
+    "PerformanceDecay",
+    "Volatility"
+  ],
+  "tunable_parameters": {
+    "selector_temperature": [
+      0.6,
+      0.8,
+      1.0
+    ],
+    "regime_weight": [
+      0.4,
+      0.6,
+      0.8
+    ],
+    "performance_lookback": [
+      20,
+      40,
+      80
+    ]
+  },
+  "symbol_fit_notes": "Portfolio-level orchestration concept for all traded symbols.",
+  "known_strengths": [
+    "adaptive behavior across regimes"
+  ],
+  "known_weaknesses": [
+    "added complexity"
+  ],
+  "implementation_status": "partially_implemented",
+  "source_type": "seed",
+  "strict_track_required": true,
+  "priority_hint": "high",
+  "default_timeframes": [
+    "1h",
+    "4h"
+  ],
+  "fee_sensitivity": "low",
+  "slippage_sensitivity": "low",
+  "funding_sensitivity": "low",
+  "implementation_notes": "Current selector includes regime weighting; this expands deterministic policy controls.",
+  "tags": [
+    "hybrid",
+    "selector",
+    "regime"
+  ]
+}

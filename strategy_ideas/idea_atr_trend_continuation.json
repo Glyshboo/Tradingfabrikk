@@ -1,0 +1,57 @@
+{
+  "id": "idea_atr_trend_continuation",
+  "name": "ATR Trend Continuation",
+  "family": "TrendCore",
+  "description": "Join trend when ATR expansion confirms directional break and trail risk with ATR multiple.",
+  "typical_market_regimes": [
+    "TREND_UP",
+    "TREND_DOWN"
+  ],
+  "common_indicators": [
+    "ATR",
+    "EMA",
+    "Donchian"
+  ],
+  "tunable_parameters": {
+    "atr_entry_mult": [
+      0.8,
+      1.2,
+      1.6
+    ],
+    "atr_trail_mult": [
+      1.5,
+      2.0,
+      2.5
+    ],
+    "min_bar_range_atr": [
+      0.9,
+      1.1,
+      1.3
+    ]
+  },
+  "symbol_fit_notes": "Majors and high-beta alts with strong volatility expansion.",
+  "known_strengths": [
+    "adaptive stop placement"
+  ],
+  "known_weaknesses": [
+    "overtrades during volatility spikes"
+  ],
+  "implementation_status": "partially_implemented",
+  "source_type": "seed",
+  "strict_track_required": true,
+  "priority_hint": "medium",
+  "default_timeframes": [
+    "1h",
+    "4h"
+  ],
+  "fee_sensitivity": "medium",
+  "slippage_sensitivity": "high",
+  "funding_sensitivity": "low",
+  "implementation_notes": "TrendCore has related ATR controls but not full entry logic.",
+  "mapped_plugin": "TrendCore",
+  "mapped_config_family": "trend_core",
+  "tags": [
+    "trend",
+    "atr"
+  ]
+}

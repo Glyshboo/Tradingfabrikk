@@ -1,0 +1,54 @@
+{
+  "id": "idea_channel_breakout_continuation",
+  "name": "Channel Breakout Continuation",
+  "family": "ChannelBreakout",
+  "description": "Continue in breakout direction while price remains above/below dynamic channel midpoint.",
+  "typical_market_regimes": [
+    "TREND_UP",
+    "TREND_DOWN"
+  ],
+  "common_indicators": [
+    "PriceChannel",
+    "ATR",
+    "EMA"
+  ],
+  "tunable_parameters": {
+    "channel_len": [
+      20,
+      40,
+      60
+    ],
+    "midline_hold_bars": [
+      2,
+      3,
+      4
+    ],
+    "atr_stop_mult": [
+      1.2,
+      1.8,
+      2.4
+    ]
+  },
+  "symbol_fit_notes": "Momentum symbols during active sessions.",
+  "known_strengths": [
+    "trend persistence capture"
+  ],
+  "known_weaknesses": [
+    "late entries in mature trend"
+  ],
+  "implementation_status": "idea_only",
+  "source_type": "seed",
+  "strict_track_required": true,
+  "priority_hint": "medium",
+  "default_timeframes": [
+    "15m",
+    "1h"
+  ],
+  "fee_sensitivity": "medium",
+  "slippage_sensitivity": "high",
+  "funding_sensitivity": "low",
+  "tags": [
+    "breakout",
+    "momentum"
+  ]
+}

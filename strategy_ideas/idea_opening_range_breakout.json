@@ -1,0 +1,54 @@
+{
+  "id": "idea_opening_range_breakout",
+  "name": "Opening Range Breakout Concept",
+  "family": "OpeningRangeBreakout",
+  "description": "Use early-session range definition and trade directional break with volatility guard.",
+  "typical_market_regimes": [
+    "TREND_UP",
+    "TREND_DOWN"
+  ],
+  "common_indicators": [
+    "SessionRange",
+    "ATR",
+    "Volume"
+  ],
+  "tunable_parameters": {
+    "opening_window_bars": [
+      2,
+      4,
+      6
+    ],
+    "breakout_buffer_bps": [
+      5,
+      10,
+      20
+    ],
+    "stop_multiple_range": [
+      0.5,
+      0.8,
+      1.2
+    ]
+  },
+  "symbol_fit_notes": "Most relevant to intraday liquid majors and clear session shifts.",
+  "known_strengths": [
+    "clear daily structure"
+  ],
+  "known_weaknesses": [
+    "24/7 crypto session ambiguity"
+  ],
+  "implementation_status": "idea_only",
+  "source_type": "seed",
+  "strict_track_required": true,
+  "priority_hint": "low",
+  "default_timeframes": [
+    "5m",
+    "15m"
+  ],
+  "fee_sensitivity": "high",
+  "slippage_sensitivity": "high",
+  "funding_sensitivity": "low",
+  "tags": [
+    "breakout",
+    "intraday"
+  ]
+}

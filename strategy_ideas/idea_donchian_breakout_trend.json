@@ -1,0 +1,54 @@
+{
+  "id": "idea_donchian_breakout_trend",
+  "name": "Donchian Breakout Trend-Following",
+  "family": "DonchianBreakout",
+  "description": "Breakout of N-bar channel in direction of broader trend with trailing exits.",
+  "typical_market_regimes": [
+    "TREND_UP",
+    "TREND_DOWN"
+  ],
+  "common_indicators": [
+    "Donchian",
+    "ATR",
+    "Volume"
+  ],
+  "tunable_parameters": {
+    "channel_len": [
+      20,
+      55,
+      100
+    ],
+    "atr_trail_mult": [
+      1.5,
+      2.5,
+      3.5
+    ],
+    "trend_filter_ema": [
+      55,
+      89
+    ]
+  },
+  "symbol_fit_notes": "Works on symbols with clean expansion phases; can degrade in mean-reverting chop.",
+  "known_strengths": [
+    "captures large moves"
+  ],
+  "known_weaknesses": [
+    "small repeated losses in sideways regimes"
+  ],
+  "implementation_status": "idea_only",
+  "source_type": "seed",
+  "strict_track_required": true,
+  "priority_hint": "high",
+  "default_timeframes": [
+    "1h",
+    "4h"
+  ],
+  "fee_sensitivity": "low",
+  "slippage_sensitivity": "medium",
+  "funding_sensitivity": "medium",
+  "implementation_notes": "Needs dedicated plugin if promoted beyond research.",
+  "tags": [
+    "trend",
+    "breakout"
+  ]
+}

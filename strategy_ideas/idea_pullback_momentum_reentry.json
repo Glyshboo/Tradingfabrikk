@@ -1,0 +1,54 @@
+{
+  "id": "idea_pullback_momentum_reentry",
+  "name": "Pullback + Momentum Re-entry",
+  "family": "PullbackMomentum",
+  "description": "Re-enter trend after shallow pullback once momentum re-accelerates.",
+  "typical_market_regimes": [
+    "TREND_UP",
+    "TREND_DOWN"
+  ],
+  "common_indicators": [
+    "EMA",
+    "ROC",
+    "ATR"
+  ],
+  "tunable_parameters": {
+    "pullback_pct": [
+      0.3,
+      0.5,
+      0.8
+    ],
+    "momentum_reentry_threshold": [
+      0.4,
+      0.8,
+      1.2
+    ],
+    "max_pullback_bars": [
+      3,
+      5,
+      8
+    ]
+  },
+  "symbol_fit_notes": "Strongly trending symbols with stair-step behavior.",
+  "known_strengths": [
+    "risk efficient continuation entries"
+  ],
+  "known_weaknesses": [
+    "fails on deep reversals"
+  ],
+  "implementation_status": "idea_only",
+  "source_type": "seed",
+  "strict_track_required": true,
+  "priority_hint": "medium",
+  "default_timeframes": [
+    "15m",
+    "1h"
+  ],
+  "fee_sensitivity": "medium",
+  "slippage_sensitivity": "medium",
+  "funding_sensitivity": "low",
+  "tags": [
+    "momentum",
+    "pullback"
+  ]
+}

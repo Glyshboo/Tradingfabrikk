@@ -1,0 +1,55 @@
+{
+  "id": "idea_momentum_continuation",
+  "name": "Momentum Continuation",
+  "family": "MomentumContinuation",
+  "description": "Enter in direction of multi-horizon momentum while trend filter remains aligned.",
+  "typical_market_regimes": [
+    "TREND_UP",
+    "TREND_DOWN"
+  ],
+  "common_indicators": [
+    "ROC",
+    "EMA",
+    "ADX"
+  ],
+  "tunable_parameters": {
+    "mom_lookback": [
+      12,
+      24,
+      48
+    ],
+    "confirm_lookback": [
+      4,
+      8,
+      12
+    ],
+    "adx_min": [
+      18,
+      22,
+      26
+    ]
+  },
+  "symbol_fit_notes": "Performs best during broad market directional impulse.",
+  "known_strengths": [
+    "captures directional persistence"
+  ],
+  "known_weaknesses": [
+    "sharp reversals hurt"
+  ],
+  "implementation_status": "idea_only",
+  "source_type": "seed",
+  "strict_track_required": true,
+  "priority_hint": "high",
+  "default_timeframes": [
+    "15m",
+    "1h",
+    "4h"
+  ],
+  "fee_sensitivity": "medium",
+  "slippage_sensitivity": "medium",
+  "funding_sensitivity": "medium",
+  "tags": [
+    "momentum",
+    "trend"
+  ]
+}

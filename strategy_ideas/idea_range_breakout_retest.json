@@ -1,0 +1,55 @@
+{
+  "id": "idea_range_breakout_retest",
+  "name": "Range Breakout + Retest",
+  "family": "ChannelRetest",
+  "description": "Trade range boundary breakouts only after retest acceptance.",
+  "typical_market_regimes": [
+    "RANGE",
+    "TREND_UP",
+    "TREND_DOWN"
+  ],
+  "common_indicators": [
+    "SupportResistance",
+    "ATR",
+    "Volume"
+  ],
+  "tunable_parameters": {
+    "range_lookback": [
+      24,
+      48,
+      72
+    ],
+    "retest_window_bars": [
+      2,
+      4,
+      6
+    ],
+    "confirmation_close_pct": [
+      0.15,
+      0.3,
+      0.5
+    ]
+  },
+  "symbol_fit_notes": "Best where repeated level interactions are common.",
+  "known_strengths": [
+    "higher quality entries"
+  ],
+  "known_weaknesses": [
+    "lower trade frequency"
+  ],
+  "implementation_status": "idea_only",
+  "source_type": "seed",
+  "strict_track_required": true,
+  "priority_hint": "medium",
+  "default_timeframes": [
+    "15m",
+    "1h"
+  ],
+  "fee_sensitivity": "medium",
+  "slippage_sensitivity": "medium",
+  "funding_sensitivity": "low",
+  "tags": [
+    "breakout",
+    "retest"
+  ]
+}

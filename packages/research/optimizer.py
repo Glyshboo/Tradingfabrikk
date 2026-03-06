@@ -46,7 +46,8 @@ class ResearchOptimizer:
     ) -> Dict[str, List[Dict]]:
         bt = CandleBacktester()
         data_manager = DataManager(symbols=symbols)
-        idea_rows = StrategyIdeaLibrary().load()
+        idea_lib = StrategyIdeaLibrary()
+        idea_rows = idea_lib.load()
         by_tuple: Dict[tuple[str, str], List[Dict]] = defaultdict(list)
 
         for symbol in symbols:
@@ -72,6 +73,15 @@ class ResearchOptimizer:
                         shape_penalty = cfg.get("atr_stop_mult", 1.0) * 0.01 if strategy_family == "TrendCore" else 0.004
                         score = res.sharpe_like + cfg["base_confidence"] - shape_penalty
                         config_name = f"{symbol.lower()}_{regime.lower()}_{strategy_family.lower()}_{i}"
+                        matching_idea = next(
+                            (
+                                x for x in idea_rows
+                                if x.get("family") == strategy_family and regime in (x.get("typical_market_regimes") or [])
+                            ),
+                            None,
+                        )
+                        context_ideas = idea_lib.rank_for_symbol_regime(symbol=symbol, regime=regime, limit=4)
+
                         payload = {
                             "id": config_name,
                             "symbol": symbol,
@@ -86,7 +96,10 @@ class ResearchOptimizer:
                             "fees": {"fee_bps": round(fee_bps, 6), "slippage_bps": round(slippage_bps, 6)},
                             "strategy_config_patch": {strategy_family: {config_name: cfg}},
                             "strategy_profile_patch": {symbol: {regime: [[strategy_family, config_name]]}},
-                            "idea_id": next((x.get("id") for x in idea_rows if x.get("family") == strategy_family and regime in (x.get("typical_market_regimes") or [])), None),
+                            "idea_id": matching_idea.get("id") if matching_idea else None,
+                            "idea_priority_hint": matching_idea.get("priority_hint") if matching_idea else None,
+                            "idea_strict_track_required": bool(matching_idea.get("strict_track_required", False)) if matching_idea else False,
+                            "idea_context_top": context_ideas,
                         }
                         by_tuple[(symbol, regime)].append(payload)
                         outfile = self.out_dir / f"{config_name}.json"

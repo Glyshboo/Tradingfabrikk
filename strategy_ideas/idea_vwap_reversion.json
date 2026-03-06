@@ -1,0 +1,54 @@
+{
+  "id": "idea_vwap_reversion",
+  "name": "VWAP Reversion Concept",
+  "family": "VWAPReversion",
+  "description": "Trade reversion toward session VWAP after stretched deviations and flow normalization.",
+  "typical_market_regimes": [
+    "RANGE"
+  ],
+  "common_indicators": [
+    "VWAP",
+    "ZScore",
+    "ATR"
+  ],
+  "tunable_parameters": {
+    "z_entry": [
+      1.5,
+      2.0,
+      2.5
+    ],
+    "z_exit": [
+      0.3,
+      0.5,
+      0.8
+    ],
+    "max_hold_bars": [
+      4,
+      8,
+      12
+    ]
+  },
+  "symbol_fit_notes": "High-liquidity majors; avoid event-driven directional days.",
+  "known_strengths": [
+    "transparent target"
+  ],
+  "known_weaknesses": [
+    "extreme trend-day risk"
+  ],
+  "implementation_status": "idea_only",
+  "source_type": "seed",
+  "strict_track_required": true,
+  "priority_hint": "medium",
+  "default_timeframes": [
+    "5m",
+    "15m"
+  ],
+  "fee_sensitivity": "high",
+  "slippage_sensitivity": "high",
+  "funding_sensitivity": "low",
+  "tags": [
+    "mean_reversion",
+    "vwap",
+    "intraday"
+  ]
+}

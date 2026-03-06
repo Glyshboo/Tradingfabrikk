@@ -1,0 +1,49 @@
+{
+  "id": "idea_mr_only_in_range_regime",
+  "name": "Mean-Reversion Only in Range Regime",
+  "family": "RegimeFilteredMR",
+  "description": "Permit MR entries only when regime score indicates range conditions.",
+  "typical_market_regimes": [
+    "RANGE"
+  ],
+  "common_indicators": [
+    "RegimeScore",
+    "RSI",
+    "Bollinger"
+  ],
+  "tunable_parameters": {
+    "range_confidence_min": [
+      0.55,
+      0.65,
+      0.75
+    ],
+    "mr_strategy_weight": [
+      0.6,
+      0.8,
+      1.0
+    ]
+  },
+  "symbol_fit_notes": "Most useful on symbols oscillating around intraday fair value.",
+  "known_strengths": [
+    "limits trend-day drawdowns"
+  ],
+  "known_weaknesses": [
+    "possible under-trading"
+  ],
+  "implementation_status": "partially_implemented",
+  "source_type": "seed",
+  "strict_track_required": true,
+  "priority_hint": "high",
+  "default_timeframes": [
+    "15m",
+    "1h"
+  ],
+  "fee_sensitivity": "medium",
+  "slippage_sensitivity": "medium",
+  "funding_sensitivity": "low",
+  "implementation_notes": "Existing selector does partial weighting; strict gating still research candidate.",
+  "tags": [
+    "regime",
+    "mean_reversion"
+  ]
+}

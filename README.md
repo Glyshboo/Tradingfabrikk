@@ -77,6 +77,12 @@ scripts\08_llm_research.bat
 ```
 
 
+Strategy idea library status:
+```bash
+python -m apps.strategy_ideas_status --ideas-dir strategy_ideas
+```
+
+
 Guardrail self-check (returnerer exit code 1 hvis en guardrail-check feiler):
 ```bash
 python -m apps.self_check_runner --config configs/active.yaml
@@ -103,6 +109,7 @@ python -m apps.self_check_runner --config configs/active.yaml
 - `scripts/05_status.bat`
 - `scripts/06_self_check.bat`
 - `scripts/09_review_candidates.bat`
+- `scripts/10_strategy_ideas_status.bat`
 - `scripts/99_stop_all.bat`
 
 ## Runbooks
@@ -132,3 +139,17 @@ python -m apps.self_check_runner --config configs/active.yaml
 - **State rehydration finished for practical runtime history**: symbol profiles, llm review history, strategy performance history, and paper/live trade histories are persisted/restored.
 - **Optional conservative symbol scheduler** added (`scheduler.enabled`) with simple hot/cold ordering and disabled by default.
 - **Strategy idea seed library wired end-to-end**: `strategy_ideas/*.json` brukes i bootstrap research/LLM bundle, mappes mot implementerte plugins (`TrendCore`, `RangeMR`) og markerer ikke-implementerte idéer som strict-track kandidater.
+
+
+## Strategy idea library (seed, non-live)
+
+- `strategy_ideas/manifest.json` is the index used for deterministic enumeration/integrity checks.
+- `strategy_ideas/idea_*.json` entries are **research inputs**, not live strategies.
+- `implementation_status` distinguishes `idea_only`, `partially_implemented`, `implemented_plugin`, and `deprecated`.
+- Conservative mapping is explicit through `mapped_plugin` (currently only `TrendCore` and `RangeMR` when actually implemented).
+- Research and LLM bundle builders consume this metadata for:
+  - symbol/regime fit suggestions
+  - parameter tuning priorities
+  - implementation prioritization (`priority_hint`)
+  - strict-track routing when code/plugin work is required.
+- Promotion path remains fail-closed and manual: idea -> research -> deterministic validation -> review -> explicit approval -> optional micro-live/live.

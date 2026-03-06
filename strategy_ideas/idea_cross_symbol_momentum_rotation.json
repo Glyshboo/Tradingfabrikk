@@ -1,0 +1,54 @@
+{
+  "id": "idea_cross_symbol_momentum_rotation",
+  "name": "Cross-Symbol Momentum Rotation",
+  "family": "MomentumRotation",
+  "description": "Rank symbols by normalized momentum and allocate to top-ranked while respecting correlation caps.",
+  "typical_market_regimes": [
+    "TREND_UP",
+    "TREND_DOWN"
+  ],
+  "common_indicators": [
+    "ROC",
+    "VolatilityAdjust",
+    "Correlation"
+  ],
+  "tunable_parameters": {
+    "momentum_lookback": [
+      12,
+      24,
+      48
+    ],
+    "rebalance_bars": [
+      1,
+      2,
+      4
+    ],
+    "top_n": [
+      1,
+      2,
+      3
+    ]
+  },
+  "symbol_fit_notes": "Requires robust multi-symbol execution and strict correlation limits.",
+  "known_strengths": [
+    "portfolio-level opportunity capture"
+  ],
+  "known_weaknesses": [
+    "operational complexity"
+  ],
+  "implementation_status": "idea_only",
+  "source_type": "seed",
+  "strict_track_required": true,
+  "priority_hint": "low",
+  "default_timeframes": [
+    "1h",
+    "4h"
+  ],
+  "fee_sensitivity": "medium",
+  "slippage_sensitivity": "high",
+  "funding_sensitivity": "medium",
+  "tags": [
+    "momentum",
+    "portfolio"
+  ]
+}

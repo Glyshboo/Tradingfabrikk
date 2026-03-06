@@ -1,0 +1,53 @@
+{
+  "id": "idea_zscore_reversion",
+  "name": "Z-Score Reversion Concept",
+  "family": "ZScoreMR",
+  "description": "Use rolling z-score extremes versus local mean to trigger symmetric reversion trades.",
+  "typical_market_regimes": [
+    "RANGE"
+  ],
+  "common_indicators": [
+    "ZScore",
+    "ATR",
+    "Volume"
+  ],
+  "tunable_parameters": {
+    "z_window": [
+      24,
+      48,
+      96
+    ],
+    "z_entry": [
+      1.5,
+      2.0,
+      2.5
+    ],
+    "z_exit": [
+      0.2,
+      0.5,
+      0.8
+    ]
+  },
+  "symbol_fit_notes": "Symbols with stationary intraday behavior and deep books.",
+  "known_strengths": [
+    "clean statistical framing"
+  ],
+  "known_weaknesses": [
+    "parameter fragility"
+  ],
+  "implementation_status": "idea_only",
+  "source_type": "seed",
+  "strict_track_required": true,
+  "priority_hint": "medium",
+  "default_timeframes": [
+    "15m",
+    "1h"
+  ],
+  "fee_sensitivity": "high",
+  "slippage_sensitivity": "medium",
+  "funding_sensitivity": "low",
+  "tags": [
+    "mean_reversion",
+    "zscore"
+  ]
+}

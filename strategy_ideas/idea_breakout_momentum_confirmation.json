@@ -1,0 +1,53 @@
+{
+  "id": "idea_breakout_momentum_confirmation",
+  "name": "Breakout + Momentum Confirmation",
+  "family": "MomentumBreakout",
+  "description": "Require both range break and momentum threshold before entry.",
+  "typical_market_regimes": [
+    "TREND_UP",
+    "TREND_DOWN"
+  ],
+  "common_indicators": [
+    "Donchian",
+    "ROC",
+    "Volume"
+  ],
+  "tunable_parameters": {
+    "breakout_len": [
+      20,
+      40
+    ],
+    "momentum_threshold": [
+      0.6,
+      1.0,
+      1.4
+    ],
+    "volume_mult": [
+      1.0,
+      1.5,
+      2.0
+    ]
+  },
+  "symbol_fit_notes": "Useful on names prone to fake breakout unless momentum confirms.",
+  "known_strengths": [
+    "reduces false breakouts"
+  ],
+  "known_weaknesses": [
+    "delayed entries"
+  ],
+  "implementation_status": "idea_only",
+  "source_type": "seed",
+  "strict_track_required": true,
+  "priority_hint": "high",
+  "default_timeframes": [
+    "15m",
+    "1h"
+  ],
+  "fee_sensitivity": "medium",
+  "slippage_sensitivity": "high",
+  "funding_sensitivity": "low",
+  "tags": [
+    "momentum",
+    "breakout"
+  ]
+}

@@ -1,0 +1,50 @@
+{
+  "id": "idea_trend_only_in_trend_regime",
+  "name": "Trend-Only in Trend Regime",
+  "family": "RegimeFilteredTrend",
+  "description": "Allow trend strategy activation only when regime engine signals trend state.",
+  "typical_market_regimes": [
+    "TREND_UP",
+    "TREND_DOWN"
+  ],
+  "common_indicators": [
+    "ADX",
+    "EMA",
+    "RegimeScore"
+  ],
+  "tunable_parameters": {
+    "regime_confidence_min": [
+      0.55,
+      0.65,
+      0.75
+    ],
+    "trend_strategy_weight": [
+      0.6,
+      0.8,
+      1.0
+    ]
+  },
+  "symbol_fit_notes": "General portfolio-level overlay for all symbols.",
+  "known_strengths": [
+    "reduces regime mismatch"
+  ],
+  "known_weaknesses": [
+    "misses early transitions"
+  ],
+  "implementation_status": "partially_implemented",
+  "source_type": "seed",
+  "strict_track_required": true,
+  "priority_hint": "high",
+  "default_timeframes": [
+    "1h",
+    "4h"
+  ],
+  "fee_sensitivity": "low",
+  "slippage_sensitivity": "low",
+  "funding_sensitivity": "low",
+  "implementation_notes": "Selector/regime components exist but explicit gating policy can be expanded.",
+  "tags": [
+    "regime",
+    "hybrid"
+  ]
+}

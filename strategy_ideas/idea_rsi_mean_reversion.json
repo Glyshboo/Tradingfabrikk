@@ -1,0 +1,59 @@
+{
+  "id": "idea_rsi_mean_reversion",
+  "name": "RSI Mean Reversion",
+  "family": "RangeMR",
+  "description": "Fade local extremes when RSI is stretched and range conditions are present.",
+  "typical_market_regimes": [
+    "RANGE"
+  ],
+  "common_indicators": [
+    "RSI",
+    "ATR",
+    "Bollinger"
+  ],
+  "tunable_parameters": {
+    "rsi_low": [
+      25,
+      30,
+      35,
+      40
+    ],
+    "rsi_high": [
+      60,
+      65,
+      70,
+      75
+    ],
+    "lookback": [
+      8,
+      12,
+      16
+    ]
+  },
+  "symbol_fit_notes": "Range-prone symbols and quieter market windows.",
+  "known_strengths": [
+    "frequent setup generation"
+  ],
+  "known_weaknesses": [
+    "breaks down in strong trends"
+  ],
+  "implementation_status": "implemented_plugin",
+  "source_type": "seed",
+  "strict_track_required": false,
+  "priority_hint": "high",
+  "default_timeframes": [
+    "5m",
+    "15m",
+    "1h"
+  ],
+  "fee_sensitivity": "high",
+  "slippage_sensitivity": "medium",
+  "funding_sensitivity": "low",
+  "implementation_notes": "Direct RangeMR mapping.",
+  "mapped_plugin": "RangeMR",
+  "mapped_config_family": "range_mr",
+  "tags": [
+    "mean_reversion",
+    "range"
+  ]
+}

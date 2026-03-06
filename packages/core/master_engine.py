@@ -69,7 +69,8 @@ class MasterEngine:
         self.live_trade_history: list[dict] = []
         self.review_context: dict = {}
         self.symbol_activity: dict[str, float] = {s: 0.0 for s in cfg["symbols"]}
-        self.idea_library = StrategyIdeaLibrary().report()
+        ideas_dir = (cfg.get("bootstrap") or {}).get("strategy_idea_library_dir", "strategy_ideas")
+        self.idea_library = StrategyIdeaLibrary(ideas_dir).report()
 
         self._load_persistent_state()
 

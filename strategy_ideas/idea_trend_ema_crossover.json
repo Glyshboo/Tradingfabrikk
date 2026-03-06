@@ -1,0 +1,60 @@
+{
+  "id": "idea_trend_ema_crossover",
+  "name": "EMA Crossover Trend Follow",
+  "family": "TrendCore",
+  "description": "Follow directional moves when fast EMA crosses and remains above/below slow EMA with trend filter.",
+  "typical_market_regimes": [
+    "TREND_UP",
+    "TREND_DOWN"
+  ],
+  "common_indicators": [
+    "EMA",
+    "ATR",
+    "ADX"
+  ],
+  "tunable_parameters": {
+    "fast_ema": [
+      8,
+      13,
+      21
+    ],
+    "slow_ema": [
+      34,
+      55,
+      89
+    ],
+    "adx_min": [
+      18,
+      22,
+      26
+    ]
+  },
+  "symbol_fit_notes": "ALL liquid perp majors; strongest on BTCUSDT/ETHUSDT in sustained trends.",
+  "known_strengths": [
+    "simple logic",
+    "maps to existing TrendCore"
+  ],
+  "known_weaknesses": [
+    "whipsaws in chop"
+  ],
+  "implementation_status": "implemented_plugin",
+  "source_type": "seed",
+  "strict_track_required": false,
+  "priority_hint": "high",
+  "default_timeframes": [
+    "15m",
+    "1h",
+    "4h"
+  ],
+  "fee_sensitivity": "medium",
+  "slippage_sensitivity": "medium",
+  "funding_sensitivity": "low",
+  "implementation_notes": "Use existing TrendCore config variants before any code change.",
+  "mapped_plugin": "TrendCore",
+  "mapped_config_family": "trend_core",
+  "tags": [
+    "trend",
+    "bootstrap",
+    "candidate_generation"
+  ]
+}

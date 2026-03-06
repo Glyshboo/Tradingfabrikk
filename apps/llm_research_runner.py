@@ -13,12 +13,16 @@ from packages.research.strategy_ideas import StrategyIdeaLibrary
 from packages.review.review_queue import ReviewQueue
 
 
-def _compact_research_bundle(status_file: str) -> dict:
+def _compact_research_bundle(status_file: str, ideas_dir: str = "strategy_ideas") -> dict:
     status_path = pathlib.Path(status_file)
     status = json.loads(status_path.read_text(encoding="utf-8")) if status_path.exists() else {}
     candidate_report = CandidateRegistry().report()
     queue_rows = ReviewQueue().list_ready()[:10]
-    ideas = StrategyIdeaLibrary().report()
+    lib = StrategyIdeaLibrary(ideas_dir)
+    ideas = lib.report()
+    active_symbols = status.get("symbols", []) or ["BTCUSDT"]
+    active_regimes = list((status.get("current_regime") or {}).values()) or ["RANGE", "TREND_UP"]
+    llm_ideas = lib.summarize_for_llm(symbols=active_symbols[:4], regimes=active_regimes[:4], limit_per_pair=3)
     return {
         "recent_performance": status.get("risk_caps_status", {}),
         "regime_distribution": status.get("current_regime", {}),
@@ -34,9 +38,16 @@ def _compact_research_bundle(status_file: str) -> dict:
         "paper_micro_live_outcomes": candidate_report.get("latest", []),
         "review_queue": queue_rows,
         "strategy_idea_library": {
-            "implemented_plugins": ideas.get("implemented_plugins", []),
-            "idea_only_top": ideas.get("idea_only", [])[:8],
-            "strict_track_candidates": ideas.get("strict_track_candidates", [])[:8],
+            "summary": {
+                "total": ideas.get("total", 0),
+                "implemented_plugin_count": len(ideas.get("implemented_plugins", [])),
+                "idea_only_count": len(ideas.get("idea_only", [])),
+                "proposed_future_count": len(ideas.get("proposed_for_future_implementation", [])),
+            },
+            "implemented_plugins": ideas.get("implemented_plugins", [])[:10],
+            "strict_track_candidates": ideas.get("strict_track_candidates", [])[:10],
+            "top_ranked_by_symbol_regime": llm_ideas.get("top_ranked_by_symbol_regime", {}),
+            "validation": llm_ideas.get("validation", {}),
         },
     }
 
@@ -51,7 +62,8 @@ def main() -> None:
     cfg = load_config(args.config)
     llm_cfg = cfg.get("llm_research") or cfg.get("llm", {})
     svc = LLMResearchService(llm_cfg)
-    bundle = _compact_research_bundle(args.status_file)
+    ideas_dir = (cfg.get("bootstrap") or {}).get("strategy_idea_library_dir", "strategy_ideas")
+    bundle = _compact_research_bundle(args.status_file, ideas_dir=ideas_dir)
     artifact = svc.research(args.prompt, bundle=bundle)
     structured = artifact.get("structured", {})
     warnings = structured.get("warnings") or []

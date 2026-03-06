@@ -1,0 +1,57 @@
+{
+  "id": "idea_volatility_squeeze_breakout",
+  "name": "Volatility Squeeze Breakout",
+  "family": "SqueezeBreakout",
+  "description": "Detect compression then trade directional expansion with confirmation.",
+  "typical_market_regimes": [
+    "RANGE",
+    "TREND_UP",
+    "TREND_DOWN"
+  ],
+  "common_indicators": [
+    "Bollinger",
+    "Keltner",
+    "ATR",
+    "Volume"
+  ],
+  "tunable_parameters": {
+    "bb_len": [
+      20
+    ],
+    "kc_len": [
+      20
+    ],
+    "squeeze_threshold": [
+      0.9,
+      1.0,
+      1.1
+    ],
+    "volume_confirm_mult": [
+      1.0,
+      1.5,
+      2.0
+    ]
+  },
+  "symbol_fit_notes": "ALL high-liquidity symbols; avoid ultra-thin books.",
+  "known_strengths": [
+    "enters early in expansion"
+  ],
+  "known_weaknesses": [
+    "false breakouts"
+  ],
+  "implementation_status": "idea_only",
+  "source_type": "seed",
+  "strict_track_required": true,
+  "priority_hint": "high",
+  "default_timeframes": [
+    "15m",
+    "1h"
+  ],
+  "fee_sensitivity": "medium",
+  "slippage_sensitivity": "medium",
+  "funding_sensitivity": "low",
+  "tags": [
+    "breakout",
+    "volatility"
+  ]
+}

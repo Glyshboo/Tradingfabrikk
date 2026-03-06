@@ -1,0 +1,56 @@
+{
+  "id": "idea_ema_pullback_continuation",
+  "name": "EMA Pullback Continuation",
+  "family": "TrendCore",
+  "description": "Enter with trend after pullback into fast/slow EMA value zone and continuation trigger.",
+  "typical_market_regimes": [
+    "TREND_UP",
+    "TREND_DOWN"
+  ],
+  "common_indicators": [
+    "EMA",
+    "ATR",
+    "RSI"
+  ],
+  "tunable_parameters": {
+    "pullback_depth_atr": [
+      0.8,
+      1.2,
+      1.6
+    ],
+    "resume_trigger": [
+      "close_back_above_fast",
+      "break_pullback_extreme"
+    ],
+    "time_stop_bars": [
+      8,
+      12,
+      20
+    ]
+  },
+  "symbol_fit_notes": "BTCUSDT, ETHUSDT, SOLUSDT when directional flow remains persistent.",
+  "known_strengths": [
+    "better entry location than raw breakout"
+  ],
+  "known_weaknesses": [
+    "misses runaway moves"
+  ],
+  "implementation_status": "implemented_plugin",
+  "source_type": "seed",
+  "strict_track_required": false,
+  "priority_hint": "high",
+  "default_timeframes": [
+    "15m",
+    "1h"
+  ],
+  "fee_sensitivity": "medium",
+  "slippage_sensitivity": "medium",
+  "funding_sensitivity": "low",
+  "implementation_notes": "Can be approximated with TrendCore profile tuning.",
+  "mapped_plugin": "TrendCore",
+  "mapped_config_family": "trend_core",
+  "tags": [
+    "trend",
+    "pullback"
+  ]
+}

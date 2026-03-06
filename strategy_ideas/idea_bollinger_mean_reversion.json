@@ -1,0 +1,55 @@
+{
+  "id": "idea_bollinger_mean_reversion",
+  "name": "Bollinger Band Mean Reversion",
+  "family": "RangeMR",
+  "description": "Fade excursions outside Bollinger envelope with volatility-normalized exits.",
+  "typical_market_regimes": [
+    "RANGE"
+  ],
+  "common_indicators": [
+    "Bollinger",
+    "RSI",
+    "ATR"
+  ],
+  "tunable_parameters": {
+    "bb_len": [
+      20,
+      30
+    ],
+    "std_mult": [
+      1.8,
+      2.2,
+      2.6
+    ],
+    "exit_centerline_buffer": [
+      0.0,
+      0.2,
+      0.4
+    ]
+  },
+  "symbol_fit_notes": "Large-cap symbols with stable liquidity and bounded intraday moves.",
+  "known_strengths": [
+    "clear statistical anchor"
+  ],
+  "known_weaknesses": [
+    "suffers on trend days"
+  ],
+  "implementation_status": "partially_implemented",
+  "source_type": "seed",
+  "strict_track_required": true,
+  "priority_hint": "medium",
+  "default_timeframes": [
+    "15m",
+    "1h"
+  ],
+  "fee_sensitivity": "high",
+  "slippage_sensitivity": "medium",
+  "funding_sensitivity": "low",
+  "implementation_notes": "RangeMR can emulate parts but not full envelope logic.",
+  "mapped_plugin": "RangeMR",
+  "mapped_config_family": "range_mr",
+  "tags": [
+    "mean_reversion",
+    "bollinger"
+  ]
+}

@@ -1,0 +1,54 @@
+{
+  "id": "idea_trend_acceleration_after_consolidation",
+  "name": "Trend Acceleration After Consolidation",
+  "family": "AccelerationBreakout",
+  "description": "Target post-consolidation impulse in prevailing trend direction.",
+  "typical_market_regimes": [
+    "TREND_UP",
+    "TREND_DOWN"
+  ],
+  "common_indicators": [
+    "ATR",
+    "ADX",
+    "PriceCompression"
+  ],
+  "tunable_parameters": {
+    "compression_window": [
+      12,
+      24,
+      36
+    ],
+    "acceleration_threshold": [
+      1.2,
+      1.6,
+      2.0
+    ],
+    "atr_stop_mult": [
+      1.0,
+      1.6,
+      2.2
+    ]
+  },
+  "symbol_fit_notes": "Pairs with cyclical volatility clustering.",
+  "known_strengths": [
+    "high reward bursts"
+  ],
+  "known_weaknesses": [
+    "infrequent setups"
+  ],
+  "implementation_status": "idea_only",
+  "source_type": "seed",
+  "strict_track_required": true,
+  "priority_hint": "medium",
+  "default_timeframes": [
+    "1h",
+    "4h"
+  ],
+  "fee_sensitivity": "low",
+  "slippage_sensitivity": "medium",
+  "funding_sensitivity": "medium",
+  "tags": [
+    "momentum",
+    "volatility"
+  ]
+}

@@ -31,6 +31,7 @@ Sjekk status (mode, symbols, open positions, last decision, ws status, account s
 ```bat
 scripts\05_status.bat
 ```
+Status-output inkluderer også `score_components` per kandidat for forklarbar seleksjon og et sammendrag av kandidat-registerets state machine.
 
 ### Going Live (Safe)
 Live krever eksplisitt `mode: live` + egne API keys i miljø. `live_runner` nekter oppstart hvis config ikke er live.

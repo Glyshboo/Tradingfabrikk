@@ -85,7 +85,7 @@ class MasterEngine:
                 cost_proxy = {
                     "spread": (snap.ask - snap.bid) / max(snap.price, 1e-9),
                     "slippage": self.profile_mgr.profiles.get(symbol).slippage_proxy if symbol in self.profile_mgr.profiles else 0.0,
-                    "funding": 0.0,
+                    "funding": self.profile_mgr.profiles.get(symbol).funding_behavior if symbol in self.profile_mgr.profiles else 0.0,
                 }
                 notional = abs(self.account.positions.get(symbol, PositionState(symbol=symbol)).qty) * snap.price
                 exposure_penalty = notional / max(self.account.equity, 1e-9)
@@ -158,12 +158,22 @@ class MasterEngine:
                 side,
                 qty,
                 fill_price,
+codex/close-the-gap-to-production-ready-architecture-h2uz9x
+                    {
+                        "stop_price": decision.sizing.get("stop_price"),
+                        "take_profit": decision.sizing.get("take_profit"),
+                        "time_stop_bars": decision.sizing.get("time_stop_bars", 0),
+                        "trail_mult": decision.sizing.get("trail_mult", 1.5),
+                    },
+                )
+=======
                 {
                     "stop_price": decision.sizing.get("stop_price"),
                     "take_profit": decision.sizing.get("take_profit"),
                     "time_stop_bars": decision.sizing.get("time_stop_bars", 0),
                 },
             )
+main
 
     async def _submit_exit(self, symbol: str, reason: str) -> None:
         pos = self.account.positions.get(symbol)

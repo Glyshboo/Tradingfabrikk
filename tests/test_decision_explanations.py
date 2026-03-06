@@ -10,6 +10,7 @@ REQUIRED_FIELDS = {
     "regime",
     "eligible_strategies",
     "score_breakdown",
+    "score_components",
     "selected_candidate",
     "selected_side",
     "side",

@@ -41,7 +41,8 @@ def main() -> None:
     args = parser.parse_args()
 
     cfg = load_config(args.config)
-    svc = LLMResearchService(cfg.get("llm", {}))
+    llm_cfg = cfg.get("llm_research") or cfg.get("llm", {})
+    svc = LLMResearchService(llm_cfg)
     bundle = _compact_research_bundle(args.status_file)
     artifact = svc.research(args.prompt, bundle=bundle)
 

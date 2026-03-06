@@ -63,6 +63,14 @@ Status:
 python -m apps.status_tool --status-file runtime/status.json
 ```
 
+Unified web review panel (all candidates in one interface):
+```bat
+scripts\09_review_candidates.bat
+```
+
+This opens a local review UI (default `http://127.0.0.1:8787`) where you can approve to micro-live/full-live (when allowed), reject, hold, and inspect candidate details/artifacts.
+
+
 Guardrail self-check (returnerer exit code 1 hvis en guardrail-check feiler):
 ```bash
 python -m apps.self_check_runner --config configs/active.yaml
@@ -88,6 +96,7 @@ python -m apps.self_check_runner --config configs/active.yaml
 - `scripts/04_all.bat`
 - `scripts/05_status.bat`
 - `scripts/06_self_check.bat`
+- `scripts/09_review_candidates.bat`
 - `scripts/99_stop_all.bat`
 
 ## Runbooks
@@ -103,5 +112,5 @@ python -m apps.self_check_runner --config configs/active.yaml
 - Unified review entrypoint: `python -m apps.review_runner --action list`.
 - Review actions: `approve_micro_live`, `approve_live_full` (only after micro-live states), `reject`, `hold`, `keep_paper`.
 - Review artifacts per candidate are stored in `runtime/review_artifacts/<candidate_id>/` (`summary.md`, `metrics.json`, `config_patch.yaml`, `risk_notes.md`, `provenance.json`, `validation_report.json`).
-- LLM research tooling: `python -m apps.llm_research_runner --prompt "..."` with provider-agnostic config (`llm.provider`, `llm.fallback_provider`).
+- LLM research tooling: `python -m apps.llm_research_runner --prompt "..."` with provider-agnostic config (`llm_research.provider`, `llm_research.fallback_provider`, aliases: `codex/openai`, `claude/anthropic`).
 - LLM output never deploys live automatically; it only creates review-bound artifacts.

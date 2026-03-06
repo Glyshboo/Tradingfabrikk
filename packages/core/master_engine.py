@@ -27,6 +27,11 @@ class MasterEngine:
         self.state_store = EngineStateStore(cfg.get("state", {}).get("engine_state_file", "runtime/engine_state.json"))
         self.session_info = self.state_store.register_startup()
         self.engine_state = "recovering"
+        recovery_cfg = cfg.get("recovery", {})
+        self.resume_cooldown_sec = float(recovery_cfg.get("resume_cooldown_sec", 5))
+        self.allow_hard_auto_resume = bool(recovery_cfg.get("allow_hard_auto_resume", False))
+        self.hard_resume_cooldown_sec = float(recovery_cfg.get("hard_resume_cooldown_sec", 45))
+        self.pause_since_ts: float | None = None
 
         self.data = DataManager(
             cfg["symbols"],
@@ -72,26 +77,65 @@ class MasterEngine:
         self.engine_state = "recovering"
         self.data.load_state(self.cfg.get("state", {}).get("data_state_file", "runtime/data_state.json"))
         self.data.backfill_gap(self.session_info.downtime_sec)
-        if self.cfg.get("mode") == "live":
-            self._sync_account_from_data_state()
+        self._sync_account_from_data_state()
+        self._recover_candidate_states()
         await asyncio.sleep(float(self.cfg.get("engine", {}).get("recovery_wait_sec", 1.0)))
         self.engine_state = "auto_resumed"
+
+    def _recover_candidate_states(self) -> None:
+        report = self.candidate_registry.report()
+        for row in report.get("latest", []):
+            cid = row.get("id")
+            if not cid:
+                continue
+            full = self.candidate_registry.get(cid) or {}
+            state = full.get("state")
+            if state == "micro_live_active":
+                self.candidate_registry.transition(cid, "micro_live_recovering")
+            if state in {"micro_live_recovering", "micro_live_paused"} and not full.get("meta", {}).get("manual_review_required", False):
+                self.candidate_registry.transition(cid, "micro_live_resumed")
+
+    def _can_auto_resume(self, hard_pause: bool = False) -> bool:
+        if not self.data.is_healthy() or not self.account.known:
+            return False
+        if not self.data.stream_health().get("market_fresh", False):
+            return False
+        if self.session_info.downtime_sec > 0 and self.data.last_update_ts is None:
+            return False
+        if hard_pause and not self.allow_hard_auto_resume:
+            return False
+        cooldown = self.hard_resume_cooldown_sec if hard_pause else self.resume_cooldown_sec
+        elapsed = time.time() - (self.pause_since_ts or 0)
+        return elapsed >= cooldown
 
     async def _decision_loop(self) -> None:
         while True:
             health_ok = self.data.is_healthy() and self.account.known
             if not health_ok:
                 self.engine_state = "soft_paused"
+                self.pause_since_ts = self.pause_since_ts or time.time()
                 self.risk.trigger_safe_pause()
                 self._write_status(self.engine_state)
                 await asyncio.sleep(1)
                 continue
 
-            if self.engine_state in {"soft_paused", "recovering", "auto_resumed"}:
-                if health_ok and not self.risk.reduce_only_mode:
-                    self.engine_state = "running"
-                elif health_ok:
+            if self.engine_state == "hard_paused":
+                if self._can_auto_resume(hard_pause=True) and self.risk.reduce_only_mode:
                     self.engine_state = "auto_resumed"
+                else:
+                    self._write_status(self.engine_state)
+                    await asyncio.sleep(1)
+                    continue
+
+            if self.engine_state in {"soft_paused", "recovering", "auto_resumed"}:
+                if self._can_auto_resume():
+                    self.risk.clear_safe_pause()
+                    self.engine_state = "running" if not self.risk.reduce_only_mode else "auto_resumed"
+                    self.pause_since_ts = None
+                else:
+                    self._write_status(self.engine_state)
+                    await asyncio.sleep(1)
+                    continue
 
             self.profile_mgr.maybe_update(self.data.market)
             self._sync_account_from_data_state()
@@ -155,6 +199,7 @@ class MasterEngine:
             log_event("decision_blocked", decision.as_audit_payload())
             if rr.reason in {"kill_switch_triggered", "weekly_guard_triggered"}:
                 self.engine_state = "hard_paused"
+                self.pause_since_ts = self.pause_since_ts or time.time()
                 await self.risk.panic_flatten(self.account, self.execution)
             return
         order.reduce_only = rr.reduce_only
@@ -163,6 +208,7 @@ class MasterEngine:
         except BinanceRequestError as exc:
             if exc.category in {"auth", "rate_limit", "server", "timeout", "network"}:
                 self.risk.trigger_safe_pause(reduce_only=True)
+                self.pause_since_ts = self.pause_since_ts or time.time()
                 self.engine_state = "soft_paused"
             decision.blocked_reason = f"execution_error:{exc.category}"
             self.audit.save_decision(decision)
@@ -233,16 +279,23 @@ class MasterEngine:
         payload["symbol_profiles"] = {k: vars(v) for k, v in self.profile_mgr.profiles.items()}
         payload["candidate_registry_snapshot"] = self.candidate_registry.report()
         payload["review_queue"] = self.review_queue.list_ready()
+        payload["llm_review_history"] = payload.get("llm_review_history", [])[-200:]
         self.state_store.save(payload)
         self.data.persist_state(self.cfg.get("state", {}).get("data_state_file", "runtime/data_state.json"))
 
     def _write_status(self, state: str) -> None:
+        llm_cfg = self.cfg.get("llm_research") or self.cfg.get("llm", {})
         write_status(
             self.cfg["telemetry"]["status_file"],
             {
                 "state": state,
                 "mode": self.cfg["mode"],
                 "symbols": self.cfg["symbols"],
+                "recovery_state": {
+                    "session_id": self.session_info.session_id,
+                    "downtime_sec": self.session_info.downtime_sec,
+                    "pause_since_ts": self.pause_since_ts,
+                },
                 "open_positions": {
                     sym: {"qty": pos.qty, "entry_price": pos.entry_price}
                     for sym, pos in self.account.positions.items()
@@ -259,12 +312,17 @@ class MasterEngine:
                 "reduce_only": self.risk.reduce_only_mode,
                 "candidate_registry": self.candidate_registry.report(),
                 "review_queue_size": len(self.review_queue.list_ready()),
-                "llm_status": {"provider": self.cfg.get("llm", {}).get("provider"), "fallback": self.cfg.get("llm", {}).get("fallback_provider")},
+                "llm_status": {
+                    "provider": llm_cfg.get("provider"),
+                    "fallback": llm_cfg.get("fallback_provider"),
+                    "enabled": llm_cfg.get("enabled", False),
+                },
                 "last_review_result_location": "runtime/reviews",
                 "risk_caps_status": {
                     "daily_pnl": self.account.daily_pnl,
                     "daily_loss_cap": self.cfg["risk"]["max_daily_loss"],
                     "weekly_loss_cap": self.cfg["risk"].get("max_weekly_loss"),
+                    "drawdown_cap_pct": self.cfg["risk"].get("max_drawdown_pct"),
                     "total_exposure_notional": self.risk._exposure(self.account, self.data.market),
                     "total_exposure_cap": self.cfg["risk"]["max_total_exposure_notional"],
                     "leverage": self.account.leverage,

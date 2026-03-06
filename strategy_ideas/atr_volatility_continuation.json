@@ -1,0 +1,15 @@
+{
+  "id": "idea_atr_volatility_continuation",
+  "name": "ATR Volatility Continuation",
+  "family": "ATRContinuation",
+  "description": "Trade volatility expansion with ATR-normalized entries and trailing exits.",
+  "typical_market_regimes": ["TREND_UP", "TREND_DOWN"],
+  "common_indicators": ["ATR", "Breakout"],
+  "tunable_parameters": {"atr_entry_mult": [0.8, 1.2, 1.6], "atr_trail_mult": [1.5, 2.0, 2.5]},
+  "symbol_fit_notes": "Works when volatility shocks persist across bars.",
+  "known_strengths": ["adapts to volatility"],
+  "known_weaknesses": ["sensitive to overfitting"],
+  "implementation_status": "idea_only",
+  "source_type": "seed",
+  "bootstrap_priority": 0.76
+}

@@ -6,6 +6,7 @@ Modulær crypto futures trading-plattform (Binance Futures cross margin) med **p
 - `apps/` kjørbare entrypoints (`live_runner.py`, `paper_runner.py`, `research_runner.py`, `status_tool.py`)
 - `packages/` gjenbrukbar logikk (data, risk, strategies, selector, execution, telemetry, backtest/research)
 - `configs/active.yaml` primær konfig
+- `strategy_ideas/` seed library med machine-friendly strategi-idéer (ikke auto-live)
 - `scripts/*.bat` start/stop/status for Windows
 
 ## Install
@@ -70,6 +71,11 @@ scripts\09_review_candidates.bat
 
 This opens a local review UI (default `http://127.0.0.1:8787`) where you can approve to micro-live/full-live (when allowed), reject, hold, and inspect candidate details/artifacts.
 
+LLM research (provider-agnostic, med fallback + budsjett):
+```bat
+scripts\08_llm_research.bat
+```
+
 
 Guardrail self-check (returnerer exit code 1 hvis en guardrail-check feiler):
 ```bash
@@ -125,3 +131,4 @@ python -m apps.self_check_runner --config configs/active.yaml
 - **LLM budgets are enforced and persisted** (`max_calls_per_day`, `max_calls_per_week`) with usage history in `runtime/llm_budget.json`; budget status is included in artifacts/status.
 - **State rehydration finished for practical runtime history**: symbol profiles, llm review history, strategy performance history, and paper/live trade histories are persisted/restored.
 - **Optional conservative symbol scheduler** added (`scheduler.enabled`) with simple hot/cold ordering and disabled by default.
+- **Strategy idea seed library wired end-to-end**: `strategy_ideas/*.json` brukes i bootstrap research/LLM bundle, mappes mot implementerte plugins (`TrendCore`, `RangeMR`) og markerer ikke-implementerte idéer som strict-track kandidater.

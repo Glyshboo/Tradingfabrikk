@@ -1,0 +1,15 @@
+{
+  "id": "idea_rsi_range_mean_reversion",
+  "name": "RSI Range Mean Reversion",
+  "family": "RangeMR",
+  "description": "Fade local extremes in non-trending range conditions with RSI and local center line.",
+  "typical_market_regimes": ["RANGE"],
+  "common_indicators": ["RSI", "ATR", "BOLLINGER"],
+  "tunable_parameters": {"rsi_low": [25, 30, 35, 40], "rsi_high": [60, 65, 70, 75], "lookback": [8, 12, 16]},
+  "symbol_fit_notes": "Best on symbols with mean-reverting intraday behavior; avoid high event-volatility windows.",
+  "known_strengths": ["high frequency in range"],
+  "known_weaknesses": ["bad in strong trend"],
+  "implementation_status": "implemented_plugin",
+  "source_type": "seed",
+  "bootstrap_priority": 0.95
+}

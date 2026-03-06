@@ -1,0 +1,15 @@
+{
+  "id": "idea_mean_reversion_bands",
+  "name": "Band-Based Mean Reversion",
+  "family": "BandMR",
+  "description": "Mean reversion on band extremes with volatility-adjusted exits.",
+  "typical_market_regimes": ["RANGE"],
+  "common_indicators": ["Bollinger Bands", "RSI", "ATR"],
+  "tunable_parameters": {"bb_len": [20, 30], "std_mult": [1.8, 2.2, 2.6], "rsi_filter": [25, 30, 35]},
+  "symbol_fit_notes": "Range-heavy symbols and hours with stable liquidity.",
+  "known_strengths": ["clear entry/exit structure"],
+  "known_weaknesses": ["trend breakdown risk"],
+  "implementation_status": "idea_only",
+  "source_type": "seed",
+  "bootstrap_priority": 0.77
+}

@@ -1,0 +1,15 @@
+{
+  "id": "idea_pullback_trend_resume",
+  "name": "Pullback Trend Resume",
+  "family": "PullbackContinuation",
+  "description": "Join dominant trend after pullback to moving average/value zone.",
+  "typical_market_regimes": ["TREND_UP", "TREND_DOWN"],
+  "common_indicators": ["EMA", "ATR", "RSI"],
+  "tunable_parameters": {"pullback_depth_atr": [0.8, 1.2, 1.6], "resume_trigger": ["candle_close", "break_high_low"]},
+  "symbol_fit_notes": "Trend symbols and sessions with persistent directional order flow.",
+  "known_strengths": ["good RR in trend"],
+  "known_weaknesses": ["late entries in sharp reversals"],
+  "implementation_status": "idea_only",
+  "source_type": "seed",
+  "bootstrap_priority": 0.82
+}

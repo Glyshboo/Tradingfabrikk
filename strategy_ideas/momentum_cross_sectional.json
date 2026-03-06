@@ -1,0 +1,15 @@
+{
+  "id": "idea_momentum_cross_sectional",
+  "name": "Cross-Symbol Momentum Rotation",
+  "family": "MomentumRotation",
+  "description": "Allocate to symbols with strongest normalized momentum and low correlation overlap.",
+  "typical_market_regimes": ["TREND_UP", "TREND_DOWN"],
+  "common_indicators": ["ROC", "ADX", "Correlation"],
+  "tunable_parameters": {"momentum_lookback": [12, 24, 48], "rebalance_bars": [1, 2, 4]},
+  "symbol_fit_notes": "Requires robust multi-symbol execution and correlation controls.",
+  "known_strengths": ["portfolio-level edge"],
+  "known_weaknesses": ["higher implementation complexity"],
+  "implementation_status": "idea_only",
+  "source_type": "seed",
+  "bootstrap_priority": 0.68
+}

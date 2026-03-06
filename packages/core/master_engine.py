@@ -12,6 +12,7 @@ from packages.execution.adapters import BinanceRequestError, ExecutionAdapter, f
 from packages.execution.position_manager import PositionManager
 from packages.profiles.symbol_profile import SymbolProfile, SymbolProfileManager
 from packages.research.candidate_registry import CandidateRegistry
+from packages.research.strategy_ideas import StrategyIdeaLibrary
 from packages.review.paper_smoke import PaperSmokeWorker
 from packages.review.review_queue import ReviewQueue
 from packages.risk.engine import RiskEngine
@@ -68,6 +69,7 @@ class MasterEngine:
         self.live_trade_history: list[dict] = []
         self.review_context: dict = {}
         self.symbol_activity: dict[str, float] = {s: 0.0 for s in cfg["symbols"]}
+        self.idea_library = StrategyIdeaLibrary().report()
 
         self._load_persistent_state()
 
@@ -89,6 +91,8 @@ class MasterEngine:
         self.engine_state = "recovering"
         self.data.load_state(self.cfg.get("state", {}).get("data_state_file", "runtime/data_state.json"))
         self.data.backfill_gap(self.session_info.downtime_sec)
+        if self.cfg.get("mode") == "live":
+            self.data.reconcile_live_account_state()
         self._sync_account_from_data_state()
         self._recover_candidate_states()
         await asyncio.sleep(float(self.cfg.get("engine", {}).get("recovery_wait_sec", 1.0)))
@@ -237,7 +241,7 @@ class MasterEngine:
             return None
         if self.micro_live_cfg.get("max_symbols", 0) == 1:
             scoped = set()
-            for cand in candidates:
+            for cand in self.active_micro_live.values():
                 for sym in (cand.get("symbols") or [symbol]):
                     if sym != "MULTI":
                         scoped.add(sym)
@@ -254,6 +258,11 @@ class MasterEngine:
         decision.qty = qty
         order = format_order(decision.symbol, side, qty)
         rr = self.risk.evaluate_order(order, self.account, self.data.market)
+        if micro_ctx and rr.allowed:
+            micro_cap = float(self.micro_live_cfg.get("max_total_exposure_notional", 0) or 0)
+            if micro_cap > 0 and self.risk._exposure(self.account, self.data.market) > micro_cap:
+                rr.allowed = False
+                rr.reason = "micro_live_total_exposure_cap"
         decision.caps_status = {
             "safe_pause": self.risk.safe_pause,
             "reduce_only_mode": self.risk.reduce_only_mode,
@@ -412,6 +421,11 @@ class MasterEngine:
                     "budget_usage": budget_runtime,
                 },
                 "micro_live": {"enabled": self.micro_live_cfg.get("enabled", False), "active": self.active_micro_live},
+                "bootstrap": {
+                    "idea_library_total": self.idea_library.get("total", 0),
+                    "implemented_plugins": [x.get("family") for x in self.idea_library.get("implemented_plugins", [])],
+                    "strict_track_ideas": [x.get("id") for x in self.idea_library.get("strict_track_candidates", [])[:6]],
+                },
                 "last_review_result_location": "runtime/reviews",
                 "risk_caps_status": {
                     "daily_pnl": self.account.daily_pnl,

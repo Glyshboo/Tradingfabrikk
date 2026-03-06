@@ -283,6 +283,37 @@ class DataManager:
             log_event("user_stream_listenkey_error", {"error": str(exc)})
             return None
 
+    def reconcile_live_account_state(self) -> bool:
+        if not self.api_key:
+            return False
+        req = request.Request(
+            url=f"{self.rest_base_url}/fapi/v2/account",
+            method="GET",
+            headers={"X-MBX-APIKEY": self.api_key},
+        )
+        try:
+            with request.urlopen(req, timeout=6.0) as resp:
+                payload = json.loads(resp.read().decode("utf-8"))
+            wallet = float(payload.get("totalWalletBalance", 0.0) or 0.0)
+            cross_wallet = float(payload.get("totalCrossWalletBalance", 0.0) or wallet)
+            self.account_state["equity"] = max(wallet, cross_wallet)
+            positions = {}
+            for row in payload.get("positions", []):
+                symbol = str(row.get("symbol", "")).upper()
+                if symbol not in self.symbols:
+                    continue
+                positions[symbol] = {
+                    "qty": float(row.get("positionAmt", 0.0) or 0.0),
+                    "entry_price": float(row.get("entryPrice", 0.0) or 0.0),
+                }
+            for symbol in self.symbols:
+                self.account_state["positions"][symbol] = positions.get(symbol, {"qty": 0.0, "entry_price": 0.0})
+            self.account_state["last_event_ts"] = time.time()
+            return True
+        except Exception as exc:
+            log_event("account_reconcile_error", {"error": str(exc)})
+            return False
+
     async def _keepalive_listen_key(self, listen_key: str) -> None:
         while True:
             await asyncio.sleep(30 * 60)

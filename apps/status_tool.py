@@ -51,6 +51,7 @@ def main() -> None:
         "review_queue_size": status.get("review_queue_size"),
         "llm_status": status.get("llm_status", {}),
         "micro_live": status.get("micro_live", {}),
+        "bootstrap": status.get("bootstrap", {}),
         "last_review_result_location": status.get("last_review_result_location"),
         "ts": status.get("ts"),
     }

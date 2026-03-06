@@ -67,26 +67,28 @@ class DecisionRecord:
     regime: str
     eligible_strategies: list[str]
     score_breakdown: Dict[str, float]
-    selected_candidate: str
-    selected_strategy: str
-    selected_config: str
-    selected_side: str
-    sizing: Dict[str, float]
+    selected_candidate: str = ""
+    selected_strategy: str = ""
+    selected_config: str = ""
+    selected_side: str = ""
+    sizing: Dict[str, float] = field(default_factory=dict)
     side: str = ""
     qty: float = 0.0
     caps_status: Dict[str, Any] = field(default_factory=dict)
     blocked_reason: Optional[str] = None
 
     def as_audit_payload(self) -> Dict[str, Any]:
+        selected_candidate = self.selected_candidate or f"{self.selected_strategy}:{self.selected_config}"
+        side = self.side or self.selected_side
         return {
             "symbol": self.symbol,
             "regime": self.regime,
             "eligible_strategies": list(self.eligible_strategies),
             "score_breakdown": dict(self.score_breakdown),
-            "selected_candidate": self.selected_candidate,
+            "selected_candidate": selected_candidate,
             "selected_strategy": self.selected_strategy,
             "selected_config": self.selected_config,
-            "side": self.side,
+            "side": side,
             "qty": self.qty,
             "sizing": dict(self.sizing),
             "caps_status": dict(self.caps_status),

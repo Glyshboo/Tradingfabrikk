@@ -7,6 +7,7 @@ from typing import Dict
 from packages.core.models import AccountState, DecisionRecord, OrderRequest, PositionState
 from packages.data.data_manager import DataManager
 from packages.execution.adapters import BinanceRequestError, ExecutionAdapter, format_order
+from packages.execution.position_manager import PositionManager
 from packages.profiles.symbol_profile import SymbolProfileManager
 from packages.risk.engine import RiskEngine
 from packages.selector.regime_engine import RegimeEngine
@@ -40,6 +41,8 @@ class MasterEngine:
         )
         self.strategies = {"TrendCore": TrendCore(), "RangeMR": RangeMR()}
         self.last_decision: dict | None = None
+        self.position_mgr = PositionManager()
+        self.current_regimes: dict[str, str] = {}
 
     async def run(self) -> None:
         log_event("engine_start", {"mode": self.cfg["mode"]})
@@ -61,11 +64,18 @@ class MasterEngine:
                 continue
 
             self.profile_mgr.maybe_update(self.data.market)
+            self._sync_account_from_data_state()
             for symbol in self.cfg["symbols"]:
                 snap = self.data.get_snapshot(symbol)
                 if not snap:
                     continue
                 regime = self.regime.classify(snap)
+                self.current_regimes[symbol] = regime.value
+                self.position_mgr.on_bar(symbol)
+                exit_reason = self.position_mgr.should_exit(symbol, snap)
+                if exit_reason:
+                    await self._submit_exit(symbol, exit_reason)
+                    continue
                 candidates = []
                 for strat_name, config_name in self.cfg["strategy_profiles"].get(symbol, {}).get(regime.value, []):
                     strat = self.strategies[strat_name]
@@ -77,7 +87,18 @@ class MasterEngine:
                     "slippage": self.profile_mgr.profiles.get(symbol).slippage_proxy if symbol in self.profile_mgr.profiles else 0.0,
                     "funding": 0.0,
                 }
-                decision = self.selector.select(symbol, regime, candidates, cost_proxy, exposure_penalty=0.0)
+                notional = abs(self.account.positions.get(symbol, PositionState(symbol=symbol)).qty) * snap.price
+                exposure_penalty = notional / max(self.account.equity, 1e-9)
+                profile = self.profile_mgr.profiles.get(symbol)
+                decision = self.selector.select(
+                    symbol,
+                    regime,
+                    candidates,
+                    cost_proxy,
+                    exposure_penalty=exposure_penalty,
+                    symbol_profile=profile,
+                    current_positions={s: p.qty for s, p in self.account.positions.items()},
+                )
                 if not decision:
                     continue
                 self.last_decision = decision.as_audit_payload()
@@ -128,6 +149,46 @@ class MasterEngine:
         payload["caps_status"]["reduce_only_order"] = order.reduce_only
         payload["result"] = res
         log_event("order_submitted", payload)
+        fill_price = self.data.get_snapshot(decision.symbol).price if self.data.get_snapshot(decision.symbol) else 0.0
+        self.data.apply_paper_fill(decision.symbol, side, qty, fill_price, reduce_only=order.reduce_only)
+        self._sync_account_from_data_state()
+        self.position_mgr.on_entry(
+            decision.symbol,
+            side,
+            qty,
+            fill_price,
+            {
+                "stop_price": decision.sizing.get("stop_price"),
+                "take_profit": decision.sizing.get("take_profit"),
+                "time_stop_bars": decision.sizing.get("time_stop_bars", 0),
+            },
+        )
+
+    async def _submit_exit(self, symbol: str, reason: str) -> None:
+        pos = self.account.positions.get(symbol)
+        if not pos or abs(pos.qty) <= 0:
+            self.position_mgr.clear(symbol)
+            return
+        side = "SELL" if pos.qty > 0 else "BUY"
+        order = format_order(symbol, side, abs(pos.qty), reduce_only=True)
+        rr = self.risk.evaluate_order(order, self.account, self.data.market)
+        if not rr.allowed:
+            log_event("exit_blocked", {"symbol": symbol, "reason": rr.reason, "exit_reason": reason})
+            return
+        await self.execution.place_order(order)
+        fill_price = self.data.get_snapshot(symbol).price if self.data.get_snapshot(symbol) else pos.entry_price
+        self.data.apply_paper_fill(symbol, side, abs(pos.qty), fill_price, reduce_only=True)
+        self._sync_account_from_data_state()
+        self.position_mgr.clear(symbol)
+        log_event("position_exit", {"symbol": symbol, "reason": reason, "side": side, "qty": abs(pos.qty)})
+
+    def _sync_account_from_data_state(self) -> None:
+        if self.data.account_state.get("equity") is not None:
+            self.account.equity = float(self.data.account_state["equity"])
+        known_positions = self.data.account_state.get("positions", {})
+        for sym in self.cfg["symbols"]:
+            row = known_positions.get(sym, {"qty": 0.0, "entry_price": 0.0})
+            self.account.positions[sym] = PositionState(symbol=sym, qty=float(row.get("qty", 0.0)), entry_price=float(row.get("entry_price", 0.0)))
 
     def _write_status(self, state: str) -> None:
         write_status(
@@ -143,6 +204,11 @@ class MasterEngine:
                 },
                 "last_decision": self.last_decision,
                 "ws_status": self.data.stream_health(),
+                "account_sync_health": {
+                    "known": self.account.known,
+                    "last_event_age_sec": self.data.stream_health().get("account_last_event_age_sec"),
+                },
+                "current_regime": self.current_regimes,
                 "safe_pause": self.risk.safe_pause,
                 "reduce_only": self.risk.reduce_only_mode,
                 "risk_caps_status": {

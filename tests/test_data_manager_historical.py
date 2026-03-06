@@ -1,12 +1,15 @@
 from packages.data.data_manager import DataManager
 
 
-def test_load_historical_prices_returns_expected_bars_and_is_deterministic():
-    dm = DataManager(symbols=["BTCUSDT"])
+def test_load_historical_prices_uses_cache(tmp_path):
+    dm = DataManager(symbols=["BTCUSDT"], cache_dir=str(tmp_path))
 
-    first = dm.load_historical_prices(symbol="BTCUSDT", regime="RANGE", bars=20)
-    second = dm.load_historical_prices(symbol="BTCUSDT", regime="RANGE", bars=20)
+    fake_rows = [[0, "1", "2", "0.5", "1.5"], [1, "1.5", "2.5", "1", "2"]]
+    dm._download_klines = lambda *args, **kwargs: fake_rows
 
-    assert len(first) == 20
-    assert first == second
-    assert all(px > 0 for px in first)
+    first = dm.load_historical_prices(symbol="BTCUSDT", regime="RANGE", bars=5)
+    second = dm.load_historical_prices(symbol="BTCUSDT", regime="RANGE", bars=5)
+
+    assert first == [1.5, 2.0]
+    assert second == first
+    assert len(list(tmp_path.glob("*.json"))) == 1

@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
+import math
 import random
+import os
+import pathlib
 import time
-from typing import Dict, Iterable
+from collections import defaultdict, deque
+from typing import Any, Dict, Iterable
 from urllib import parse, request
 
 import websockets
@@ -23,6 +26,7 @@ class DataManager:
         rest_base_url: str = "https://fapi.binance.com",
         ws_base_url: str = "wss://fstream.binance.com",
         require_user_stream_auth: bool = False,
+        cache_dir: str = "runtime/data_cache",
     ):
         self.symbols = [s.upper().replace("/", "") for s in symbols]
         self.market: Dict[str, MarketSnapshot] = {}
@@ -35,6 +39,14 @@ class DataManager:
         self.rest_base_url = rest_base_url.rstrip("/")
         self.ws_base_url = ws_base_url.rstrip("/")
         self.require_user_stream_auth = require_user_stream_auth
+        self.cache_dir = pathlib.Path(cache_dir)
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+
+        self.candles: dict[str, dict[str, deque[dict[str, float | bool]]]] = {
+            sym: {"1h": deque(maxlen=1200), "4h": deque(maxlen=1200)} for sym in self.symbols
+        }
+        self._active_candles: dict[str, dict[str, dict[str, float | bool]]] = defaultdict(dict)
+        self.account_state: dict[str, Any] = {"equity": None, "positions": {}, "last_event_ts": None}
 
     async def run_market_stream(self) -> None:
         url = self._market_stream_url()
@@ -82,8 +94,9 @@ class DataManager:
             try:
                 async with websockets.connect(ws_url, ping_interval=20, ping_timeout=10, close_timeout=5) as ws:
                     self.user_stream_alive = True
-                    async for _ in ws:
+                    async for message in ws:
                         self.user_stream_alive = True
+                        self._ingest_user_message(message)
             except Exception as exc:
                 self.user_stream_alive = False
                 log_event("user_stream_drop", {"error": str(exc)})
@@ -97,6 +110,11 @@ class DataManager:
         symbol = str(data.get("s", "")).upper()
         if symbol not in self.symbols:
             return
+
+        if data.get("e") == "kline" and data.get("k"):
+            self._ingest_kline(symbol, data["k"])
+            return
+
         bid = float(data.get("b", data.get("c", 0.0)))
         ask = float(data.get("a", data.get("c", 0.0)))
         price = (bid + ask) / 2 if bid and ask else float(data.get("c", 0.0))
@@ -106,15 +124,132 @@ class DataManager:
             price=price,
             bid=bid if bid else price,
             ask=ask if ask else price,
-            candle_close=price,
+            candle_close=prev.candle_close if prev else price,
             atr=prev.atr if prev else None,
             rsi=prev.rsi if prev else None,
             ts=now,
         )
 
+    def _ingest_kline(self, symbol: str, kline: dict[str, Any]) -> None:
+        interval = str(kline.get("i", ""))
+        if interval not in {"1h", "4h"}:
+            return
+        candle = {
+            "open_time": float(kline.get("t", 0.0)),
+            "close_time": float(kline.get("T", 0.0)),
+            "open": float(kline.get("o", 0.0)),
+            "high": float(kline.get("h", 0.0)),
+            "low": float(kline.get("l", 0.0)),
+            "close": float(kline.get("c", 0.0)),
+            "closed": bool(kline.get("x", False)),
+        }
+        self._active_candles[symbol][interval] = candle
+        if candle["closed"]:
+            self._append_closed_candle(symbol, interval, candle)
+
+        atr = self._compute_atr(symbol, interval, 14)
+        rsi = self._compute_rsi(symbol, interval, 14)
+        prev = self.market.get(symbol)
+        base_bid = prev.bid if prev else candle["close"]
+        base_ask = prev.ask if prev else candle["close"]
+        self.market[symbol] = MarketSnapshot(
+            symbol=symbol,
+            price=candle["close"],
+            bid=base_bid,
+            ask=base_ask,
+            candle_close=candle["close"],
+            atr=atr,
+            rsi=rsi,
+            ts=time.time(),
+        )
+
+    def _append_closed_candle(self, symbol: str, interval: str, candle: dict[str, float | bool]) -> None:
+        series = self.candles[symbol][interval]
+        if series and series[-1]["open_time"] == candle["open_time"]:
+            series[-1] = candle
+        else:
+            series.append(candle)
+
+    def _compute_atr(self, symbol: str, interval: str, period: int) -> float | None:
+        candles = list(self.candles[symbol][interval])
+        if len(candles) < period + 1:
+            return None
+        true_ranges: list[float] = []
+        for i in range(1, len(candles)):
+            curr = candles[i]
+            prev_close = float(candles[i - 1]["close"])
+            high = float(curr["high"])
+            low = float(curr["low"])
+            tr = max(high - low, abs(high - prev_close), abs(low - prev_close))
+            true_ranges.append(tr)
+        if len(true_ranges) < period:
+            return None
+        return round(sum(true_ranges[-period:]) / period, 8)
+
+    def _compute_rsi(self, symbol: str, interval: str, period: int) -> float | None:
+        candles = list(self.candles[symbol][interval])
+        if len(candles) < period + 1:
+            return None
+        closes = [float(c["close"]) for c in candles]
+        gains = []
+        losses = []
+        for i in range(1, len(closes)):
+            diff = closes[i] - closes[i - 1]
+            gains.append(max(0.0, diff))
+            losses.append(max(0.0, -diff))
+        avg_gain = sum(gains[-period:]) / period
+        avg_loss = sum(losses[-period:]) / period
+        if avg_loss <= 1e-12:
+            return 100.0
+        rs = avg_gain / avg_loss
+        return round(100 - (100 / (1 + rs)), 6)
+
     def _market_stream_url(self) -> str:
-        streams = "/".join(f"{s.lower()}@bookTicker" for s in self.symbols)
-        return f"{self.ws_base_url}/stream?streams={streams}"
+        streams = [f"{s.lower()}@bookTicker" for s in self.symbols]
+        for s in self.symbols:
+            streams.append(f"{s.lower()}@kline_1h")
+            streams.append(f"{s.lower()}@kline_4h")
+        return f"{self.ws_base_url}/stream?streams={'/'.join(streams)}"
+
+    def _ingest_user_message(self, message: str) -> None:
+        payload = json.loads(message)
+        evt = payload.get("e")
+        if evt == "ACCOUNT_UPDATE":
+            account = payload.get("a", {})
+            balances = account.get("B", [])
+            usdt = next((b for b in balances if b.get("a") == "USDT"), None)
+            if usdt:
+                wb = float(usdt.get("wb", 0.0))
+                cw = float(usdt.get("cw", wb))
+                self.account_state["equity"] = max(wb, cw)
+            positions = {}
+            for p in account.get("P", []):
+                symbol = str(p.get("s", "")).upper()
+                if symbol in self.symbols:
+                    qty = float(p.get("pa", 0.0))
+                    positions[symbol] = {"qty": qty, "entry_price": float(p.get("ep", 0.0))}
+            if positions:
+                self.account_state["positions"] = positions
+            self.account_state["last_event_ts"] = time.time()
+        elif evt == "ORDER_TRADE_UPDATE":
+            self.account_state["last_event_ts"] = time.time()
+
+    def apply_paper_fill(self, symbol: str, side: str, qty: float, fill_price: float, reduce_only: bool = False) -> None:
+        symbol = symbol.upper().replace("/", "")
+        pos = self.account_state["positions"].get(symbol, {"qty": 0.0, "entry_price": 0.0})
+        signed_qty = qty if side.upper() == "BUY" else -qty
+        existing_qty = float(pos.get("qty", 0.0))
+        new_qty = existing_qty + signed_qty
+        if reduce_only and (existing_qty == 0 or math.copysign(1.0, existing_qty) == math.copysign(1.0, new_qty) and abs(new_qty) > abs(existing_qty)):
+            return
+        if abs(new_qty) < 1e-12:
+            self.account_state["positions"][symbol] = {"qty": 0.0, "entry_price": 0.0}
+        elif existing_qty == 0 or math.copysign(1.0, existing_qty) != math.copysign(1.0, new_qty):
+            self.account_state["positions"][symbol] = {"qty": new_qty, "entry_price": fill_price}
+        else:
+            weighted = ((abs(existing_qty) * pos.get("entry_price", 0.0)) + (abs(signed_qty) * fill_price)) / max(abs(new_qty), 1e-12)
+            self.account_state["positions"][symbol] = {"qty": new_qty, "entry_price": weighted}
+        self.account_state["last_event_ts"] = time.time()
 
     def _create_listen_key(self) -> str | None:
         req = request.Request(
@@ -172,6 +307,9 @@ class DataManager:
             "market_age_sec": market_age_sec,
             "user_stream_alive": self.user_stream_alive,
             "stale_after_sec": self.stale_after_sec,
+            "account_last_event_age_sec": None
+            if self.account_state.get("last_event_ts") is None
+            else max(0.0, time.time() - float(self.account_state["last_event_ts"])),
         }
 
     def load_historical_prices(
@@ -181,24 +319,50 @@ class DataManager:
         start_ts: int | None = None,
         end_ts: int | None = None,
         bars: int = 400,
+        interval: str = "1h",
     ) -> list[float]:
-        if symbol not in self.symbols:
-            return []
-        if bars < 3:
+        symbol = symbol.upper().replace("/", "")
+        if symbol not in self.symbols or bars < 3:
             return []
 
-        seed = hash((symbol, regime, start_ts, end_ts)) & 0xFFFFFFFF
-        rng = random.Random(seed)
-        base_price = 100.0 + (abs(hash(symbol)) % 200)
-        regime_drift = {
-            "TREND_UP": 0.18,
-            "TREND_DOWN": -0.18,
-            "RANGE": 0.0,
-        }.get(regime, 0.0)
+        cache_file = self.cache_dir / f"{symbol}_{interval}_{start_ts or 0}_{end_ts or 0}_{bars}.json"
+        if cache_file.exists():
+            payload = json.loads(cache_file.read_text(encoding="utf-8"))
+            return [float(r[4]) for r in payload]
 
-        prices = [base_price]
-        for _ in range(1, bars):
-            drift = regime_drift + rng.uniform(-0.12, 0.12)
-            next_px = max(0.1, prices[-1] + drift)
-            prices.append(next_px)
-        return prices
+        klines = self._download_klines(symbol, interval=interval, start_ts=start_ts, end_ts=end_ts, limit=bars)
+        if not klines:
+            # fail-safe research fallback when remote data is temporarily unavailable
+            seed = hash((symbol, interval, start_ts, end_ts, bars, regime)) & 0xFFFFFFFF
+            rng = random.Random(seed)
+            px = 100.0 + (abs(hash(symbol)) % 200)
+            klines = []
+            for i in range(bars):
+                drift = rng.uniform(-0.5, 0.5)
+                px = max(0.1, px + drift)
+                klines.append([i, str(px), str(px), str(px), str(px)])
+        cache_file.write_text(json.dumps(klines), encoding="utf-8")
+        return [float(r[4]) for r in klines]
+
+    def _download_klines(
+        self,
+        symbol: str,
+        interval: str = "1h",
+        start_ts: int | None = None,
+        end_ts: int | None = None,
+        limit: int = 400,
+    ) -> list[list[Any]]:
+        q = {"symbol": symbol, "interval": interval, "limit": min(1500, max(3, limit))}
+        if start_ts:
+            q["startTime"] = int(start_ts)
+        if end_ts:
+            q["endTime"] = int(end_ts)
+        url = f"{self.rest_base_url}/fapi/v1/klines?{parse.urlencode(q)}"
+        try:
+            with request.urlopen(url, timeout=6.0) as resp:
+                payload = json.loads(resp.read().decode("utf-8"))
+                if isinstance(payload, list):
+                    return payload
+        except Exception as exc:
+            log_event("historical_klines_error", {"symbol": symbol, "interval": interval, "error": str(exc)})
+        return []

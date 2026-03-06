@@ -1,3 +1,2 @@
 @echo off
-REM Unified review launcher (legacy name kept for compatibility)
 python -m apps.review_server --host 127.0.0.1 --port 8787

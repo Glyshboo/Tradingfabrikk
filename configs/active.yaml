@@ -8,6 +8,19 @@ engine:
   stale_after_sec: 15
   decision_interval_sec: 2
   profile_update_sec: 30
+  recovery_wait_sec: 1
+
+recovery:
+  resume_cooldown_sec: 5
+  allow_hard_auto_resume: false
+  hard_resume_cooldown_sec: 45
+  require_backfill: true
+
+micro_live:
+  enabled: true
+  max_symbols: 1
+  max_total_exposure_notional: 1500
+  risk_multiplier: 0.35
 
 sizing:
   base_qty: 0.01
@@ -70,7 +83,6 @@ telemetry:
 logging:
   level: INFO
 
-
 state:
   engine_state_file: runtime/engine_state.json
   data_state_file: runtime/data_state.json
@@ -78,9 +90,24 @@ state:
 review:
   queue_file: runtime/review_queue.json
   candidate_registry_file: runtime/candidates_registry.json
+  server:
+    host: 127.0.0.1
+    port: 8787
+    auto_open_browser: true
 
-llm:
-  provider: openai
-  fallback_provider: anthropic
+llm_research:
+  enabled: true
+  provider: codex
+  fallback_provider: claude
+  mode: advisory
+  trigger:
+    manual: true
+    weekly_review: true
+    performance_drop: true
+  budgets:
+    max_calls_per_day: 6
+    max_calls_per_week: 20
+  approvals:
+    live_promotion_required: true
   openai_model: gpt-4o-mini
   anthropic_model: claude-3-5-sonnet-latest

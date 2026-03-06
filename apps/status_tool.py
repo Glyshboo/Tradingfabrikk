@@ -38,6 +38,7 @@ def main() -> None:
         "mode": status.get("mode"),
         "state": status.get("state"),
         "symbols": status.get("symbols", []),
+        "recovery_state": status.get("recovery_state", {}),
         "open_positions": status.get("open_positions", {}),
         "last_decision": decision_view,
         "ws_status": status.get("ws_status", {}),

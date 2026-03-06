@@ -35,6 +35,8 @@ def main() -> None:
         "open_positions": status.get("open_positions", {}),
         "last_decision": decision_view,
         "ws_status": status.get("ws_status", {}),
+        "account_sync_health": status.get("account_sync_health", {}),
+        "current_regime": status.get("current_regime", {}),
         "risk_caps_status": status.get("risk_caps_status", {}),
         "safe_pause": status.get("safe_pause"),
         "reduce_only": status.get("reduce_only"),

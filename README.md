@@ -27,7 +27,7 @@ Windows:
 scripts\02_paper.bat
 ```
 
-Sjekk status (mode, symbols, open positions, last decision, ws status, risk caps):
+Sjekk status (mode, symbols, open positions, last decision, ws status, account sync health, regime per symbol, risk caps):
 ```bat
 scripts\05_status.bat
 ```
@@ -51,6 +51,11 @@ Research/backtest (egen prosess):
 ```bash
 python -m apps.research_runner --config configs/active.yaml --space configs/research_space.yaml
 ```
+
+Research/backtest henter nå Binance historical klines og cacher automatisk i `runtime/data_cache/`.
+Hvis Binance-data ikke er tilgjengelig, stopper research/backtest for den symbol/regime-bøtten (fail-closed, ingen syntetisk fallback).
+Candidate-pipeline lagres i `runtime/candidates_registry.json` med states:
+`candidate -> backtest_pass -> paper_pass -> ready_for_review -> live_approved`.
 
 Status:
 ```bash

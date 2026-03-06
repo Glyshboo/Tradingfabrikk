@@ -5,6 +5,7 @@ import argparse
 from packages.core.config import REQUIRED_TOP_LEVEL_KEYS
 from packages.core.config import load_config
 from packages.profiles.symbol_profile import SymbolProfile
+from packages.research.candidate_registry import CandidateRegistry
 from packages.research.optimizer import ResearchOptimizer
 
 
@@ -82,6 +83,12 @@ def main() -> None:
     for key, rows in sorted(ranking.items()):
         top = rows[0]["score"] if rows else "n/a"
         print(f"  {key} -> top_score={top}")
+    registry = CandidateRegistry()
+    for rows in ranking.values():
+        for row in rows:
+            registry.register(row["id"], row["score"], {"symbol": row["symbol"], "regime": row["regime"]})
+            registry.transition(row["id"], "backtest_pass")
+    print(f"Candidate registry: {registry.report()}")
 
 
 if __name__ == "__main__":

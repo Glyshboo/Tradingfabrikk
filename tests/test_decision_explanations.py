@@ -11,6 +11,7 @@ REQUIRED_FIELDS = {
     "eligible_strategies",
     "score_breakdown",
     "selected_candidate",
+    "selected_side",
     "side",
     "qty",
     "blocked_reason",

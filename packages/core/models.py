@@ -88,6 +88,7 @@ class DecisionRecord:
             "selected_candidate": selected_candidate,
             "selected_strategy": self.selected_strategy,
             "selected_config": self.selected_config,
+            "selected_side": self.selected_side,
             "side": side,
             "qty": self.qty,
             "sizing": dict(self.sizing),

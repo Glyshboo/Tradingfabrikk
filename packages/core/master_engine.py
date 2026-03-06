@@ -150,19 +150,20 @@ class MasterEngine:
         payload["result"] = res
         log_event("order_submitted", payload)
         fill_price = self.data.get_snapshot(decision.symbol).price if self.data.get_snapshot(decision.symbol) else 0.0
-        self.data.apply_paper_fill(decision.symbol, side, qty, fill_price, reduce_only=order.reduce_only)
-        self._sync_account_from_data_state()
-        self.position_mgr.on_entry(
-            decision.symbol,
-            side,
-            qty,
-            fill_price,
-            {
-                "stop_price": decision.sizing.get("stop_price"),
-                "take_profit": decision.sizing.get("take_profit"),
-                "time_stop_bars": decision.sizing.get("time_stop_bars", 0),
-            },
-        )
+        if self.cfg.get("mode") == "paper":
+            self.data.apply_paper_fill(decision.symbol, side, qty, fill_price, reduce_only=order.reduce_only)
+            self._sync_account_from_data_state()
+            self.position_mgr.on_entry(
+                decision.symbol,
+                side,
+                qty,
+                fill_price,
+                {
+                    "stop_price": decision.sizing.get("stop_price"),
+                    "take_profit": decision.sizing.get("take_profit"),
+                    "time_stop_bars": decision.sizing.get("time_stop_bars", 0),
+                },
+            )
 
     async def _submit_exit(self, symbol: str, reason: str) -> None:
         pos = self.account.positions.get(symbol)
@@ -177,18 +178,28 @@ class MasterEngine:
             return
         await self.execution.place_order(order)
         fill_price = self.data.get_snapshot(symbol).price if self.data.get_snapshot(symbol) else pos.entry_price
-        self.data.apply_paper_fill(symbol, side, abs(pos.qty), fill_price, reduce_only=True)
-        self._sync_account_from_data_state()
+        if self.cfg.get("mode") == "paper":
+            self.data.apply_paper_fill(symbol, side, abs(pos.qty), fill_price, reduce_only=True)
+            self._sync_account_from_data_state()
         self.position_mgr.clear(symbol)
         log_event("position_exit", {"symbol": symbol, "reason": reason, "side": side, "qty": abs(pos.qty)})
 
     def _sync_account_from_data_state(self) -> None:
         if self.data.account_state.get("equity") is not None:
             self.account.equity = float(self.data.account_state["equity"])
+            self.account.known = True
+        else:
+            self.account.known = self.cfg.get("mode") != "live"
         known_positions = self.data.account_state.get("positions", {})
         for sym in self.cfg["symbols"]:
             row = known_positions.get(sym, {"qty": 0.0, "entry_price": 0.0})
             self.account.positions[sym] = PositionState(symbol=sym, qty=float(row.get("qty", 0.0)), entry_price=float(row.get("entry_price", 0.0)))
+        last_event_ts = self.data.account_state.get("last_event_ts")
+        if self.cfg.get("mode") == "live":
+            if last_event_ts is None:
+                self.account.known = False
+            else:
+                self.account.known = (time.time() - float(last_event_ts)) <= (self.cfg["engine"]["stale_after_sec"] * 2)
 
     def _write_status(self, state: str) -> None:
         write_status(

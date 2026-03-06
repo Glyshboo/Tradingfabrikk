@@ -1,4 +1,7 @@
 @echo off
+setlocal
+cd /d "%~dp0.."
+
 taskkill /FI "WINDOWTITLE eq paper" /T /F
 taskkill /FI "WINDOWTITLE eq live" /T /F
 taskkill /FI "WINDOWTITLE eq research" /T /F

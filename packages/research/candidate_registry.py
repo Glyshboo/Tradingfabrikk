@@ -13,6 +13,10 @@ STATES = [
     "backtest_pass",
     "paper_smoke_running",
     "paper_smoke_pass",
+    "paper_candidate_active",
+    "paper_candidate_paused",
+    "paper_candidate_pass",
+    "paper_candidate_fail",
     "ready_for_review",
     "approved_for_micro_live",
     "micro_live_active",
@@ -20,6 +24,7 @@ STATES = [
     "micro_live_recovering",
     "micro_live_resumed",
     "approved_for_live_full",
+    "live_full_active",
     "rejected",
 ]
 STATE_ORDER = {name: idx for idx, name in enumerate(STATES)}
@@ -89,7 +94,7 @@ class CandidateRegistry:
         data = self._load()
         if candidate_id in data["candidates"]:
             current_state = data["candidates"][candidate_id].get("state", "idea_proposed")
-            if state in {"rejected", "validation_failed", "micro_live_paused"}:
+            if state in {"rejected", "validation_failed", "micro_live_paused", "paper_candidate_active", "paper_candidate_paused", "paper_candidate_pass", "paper_candidate_fail"}:
                 pass
             elif STATE_ORDER[state] < STATE_ORDER.get(current_state, 0):
                 raise ValueError(f"invalid backward transition {current_state} -> {state}")

@@ -30,7 +30,9 @@ class AuditStore:
                 qty REAL,
                 sizing TEXT,
                 caps_status TEXT,
-                blocked_reason TEXT
+                blocked_reason TEXT,
+                runtime_model TEXT,
+                overlay_candidate_id TEXT
             )
             """
         )
@@ -46,14 +48,18 @@ class AuditStore:
             self.conn.execute("ALTER TABLE decisions ADD COLUMN qty REAL")
         if "caps_status" not in existing:
             self.conn.execute("ALTER TABLE decisions ADD COLUMN caps_status TEXT")
+        if "runtime_model" not in existing:
+            self.conn.execute("ALTER TABLE decisions ADD COLUMN runtime_model TEXT")
+        if "overlay_candidate_id" not in existing:
+            self.conn.execute("ALTER TABLE decisions ADD COLUMN overlay_candidate_id TEXT")
         self.conn.commit()
 
     def save_decision(self, rec: DecisionRecord) -> None:
         self.conn.execute(
             """
             INSERT INTO decisions(symbol, regime, eligible_strategies, score_breakdown,
-            selected_candidate, selected_strategy, selected_config, side, qty, sizing, caps_status, blocked_reason)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            selected_candidate, selected_strategy, selected_config, side, qty, sizing, caps_status, blocked_reason, runtime_model, overlay_candidate_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 rec.symbol,
@@ -68,6 +74,8 @@ class AuditStore:
                 json.dumps(rec.sizing),
                 json.dumps(rec.caps_status),
                 rec.blocked_reason,
+                rec.runtime_model,
+                rec.overlay_candidate_id,
             ),
         )
         self.conn.commit()

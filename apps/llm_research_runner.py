@@ -8,6 +8,7 @@ import time
 from packages.core.config import load_config
 from packages.core.state_store import EngineStateStore
 from packages.llm.research import LLMResearchService
+from packages.research.candidate_bridge import validate_llm_candidate_payload
 from packages.research.candidate_registry import CandidateRegistry
 from packages.research.strategy_ideas import StrategyIdeaLibrary
 from packages.review.review_queue import ReviewQueue
@@ -70,6 +71,7 @@ def main() -> None:
     code_level = any("code" in str(x).lower() for x in warnings) or bool(structured.get("proposed_code_patch"))
     candidate_type = "code" if code_level else ("search-space" if structured.get("search_space_patch") else "config")
     track = "strict" if candidate_type == "code" else "fast"
+    executable_ok, executable_errors, normalized = validate_llm_candidate_payload(cfg, structured)
 
     candidate_id = f"llm_{artifact['id'][:10]}"
     registry = CandidateRegistry()
@@ -80,7 +82,8 @@ def main() -> None:
     candidate_dir.mkdir(parents=True, exist_ok=True)
     (candidate_dir / "summary.md").write_text(f"# {candidate_id}\n\n{artifact.get('summary','')}\n", encoding="utf-8")
     (candidate_dir / "structured.json").write_text(json.dumps(artifact.get("structured", {}), indent=2), encoding="utf-8")
-    (candidate_dir / "validation_report.json").write_text(json.dumps({"llm_only": True, "auto_deploy": False, "budget": artifact.get("budget", {})}, indent=2), encoding="utf-8")
+    (candidate_dir / "validation_report.json").write_text(json.dumps({"llm_only": True, "auto_deploy": False, "budget": artifact.get("budget", {}), "executable_ok": executable_ok, "errors": executable_errors}, indent=2), encoding="utf-8")
+    validation_report = {"llm_only": True, "auto_deploy": False, "budget": artifact.get("budget", {}), "executable_ok": executable_ok, "errors": executable_errors}
     registry.register(
         candidate_id,
         score=0.0,
@@ -95,36 +98,42 @@ def main() -> None:
             "diagnosis": artifact.get("structured", {}).get("diagnosis", ""),
             "backtest_result": None,
             "oos_result": None,
-            "config_patch": artifact.get("structured", {}).get("config_patch") or {},
+            "config_patch": normalized.get("config_patch", {}),
+            "strategy_profile_patch": normalized.get("strategy_profile_patch", {}),
+            "search_space_patch": normalized.get("search_space_patch", {}),
             "risk_notes": "requires manual validation; LLM output never auto-deploys",
             "provider_used": artifact["provider"],
-            "validation_report": {"llm_only": True, "auto_deploy": False, "budget": artifact.get("budget", {})},
+            "validation_report": validation_report,
             "artifact_bundle": str(candidate_dir),
             "code_change": code_level,
         },
     )
     registry.transition(candidate_id, "config_generated")
-    registry.transition(candidate_id, "ready_for_review")
-    queue.enqueue(
-        {
-            "id": candidate_id,
-            "type": candidate_type,
-            "track": track,
-            "symbols": ["MULTI"],
-            "regimes": ["MIXED"],
-            "strategy_family": "LLMProposal",
-            "provider": artifact["provider"],
-            "backtest_result": None,
-            "oos_result": None,
-            "paper_smoke_result": None,
-            "risk_notes": "manual strict review required" if track == "strict" else "manual review required",
-            "config_patch": artifact.get("structured", {}).get("config_patch") or {},
-            "warnings": (artifact.get("structured", {}).get("warnings") or []) + ["LLM-generated idea; deterministic validation required"],
-            "recommendation": "hold_for_validation",
-            "structured": artifact.get("structured", {}),
-            "created_ts": time.time(),
-        }
-    )
+    if executable_ok and track != "strict":
+        registry.transition(candidate_id, "ready_for_review")
+        queue.enqueue(
+            {
+                "id": candidate_id,
+                "type": candidate_type,
+                "track": track,
+                "symbols": ["MULTI"],
+                "regimes": ["MIXED"],
+                "strategy_family": "LLMProposal",
+                "provider": artifact["provider"],
+                "backtest_result": None,
+                "oos_result": None,
+                "paper_smoke_result": None,
+                "risk_notes": "manual strict review required" if track == "strict" else "manual review required",
+                "config_patch": normalized.get("config_patch", {}),
+                "search_space_patch": normalized.get("search_space_patch", {}),
+                "warnings": (artifact.get("structured", {}).get("warnings") or []) + ["LLM-generated idea; deterministic validation required"],
+                "recommendation": "hold_for_validation",
+                "structured": artifact.get("structured", {}),
+                "created_ts": time.time(),
+            }
+        )
+    else:
+        registry.transition(candidate_id, "validation_failed")
 
     state_store = EngineStateStore(cfg.get("state", {}).get("engine_state_file", "runtime/engine_state.json"))
     payload = state_store.load()

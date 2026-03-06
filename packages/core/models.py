@@ -77,6 +77,8 @@ class DecisionRecord:
     qty: float = 0.0
     caps_status: Dict[str, Any] = field(default_factory=dict)
     blocked_reason: Optional[str] = None
+    runtime_model: str = "baseline"
+    overlay_candidate_id: str = ""
 
     def as_audit_payload(self) -> Dict[str, Any]:
         selected_candidate = self.selected_candidate or f"{self.selected_strategy}:{self.selected_config}"
@@ -96,4 +98,6 @@ class DecisionRecord:
             "sizing": dict(self.sizing),
             "caps_status": dict(self.caps_status),
             "blocked_reason": self.blocked_reason,
+            "runtime_model": self.runtime_model,
+            "overlay_candidate_id": self.overlay_candidate_id,
         }

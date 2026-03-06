@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import json
 import math
-import random
 import os
 import pathlib
 import time
@@ -46,6 +45,9 @@ class DataManager:
             sym: {"1h": deque(maxlen=1200), "4h": deque(maxlen=1200)} for sym in self.symbols
         }
         self._active_candles: dict[str, dict[str, dict[str, float | bool]]] = defaultdict(dict)
+        self._indicators: dict[str, dict[str, dict[str, float | None]]] = {
+            sym: {"1h": {"atr": None, "rsi": None}, "4h": {"atr": None, "rsi": None}} for sym in self.symbols
+        }
         self.account_state: dict[str, Any] = {"equity": None, "positions": {}, "last_event_ts": None}
 
     async def run_market_stream(self) -> None:
@@ -146,9 +148,14 @@ class DataManager:
         self._active_candles[symbol][interval] = candle
         if candle["closed"]:
             self._append_closed_candle(symbol, interval, candle)
+            self._indicators[symbol][interval] = {
+                "atr": self._compute_atr(symbol, interval, 14),
+                "rsi": self._compute_rsi(symbol, interval, 14),
+            }
 
-        atr = self._compute_atr(symbol, interval, 14)
-        rsi = self._compute_rsi(symbol, interval, 14)
+        ref_interval = "1h" if self._indicators[symbol]["1h"]["atr"] is not None else interval
+        atr = self._indicators[symbol][ref_interval]["atr"]
+        rsi = self._indicators[symbol][ref_interval]["rsi"]
         prev = self.market.get(symbol)
         base_bid = prev.bid if prev else candle["close"]
         base_ask = prev.ask if prev else candle["close"]
@@ -213,6 +220,7 @@ class DataManager:
 
     def _ingest_user_message(self, message: str) -> None:
         payload = json.loads(message)
+        payload = payload.get("data", payload)
         evt = payload.get("e")
         if evt == "ACCOUNT_UPDATE":
             account = payload.get("a", {})
@@ -228,10 +236,19 @@ class DataManager:
                 if symbol in self.symbols:
                     qty = float(p.get("pa", 0.0))
                     positions[symbol] = {"qty": qty, "entry_price": float(p.get("ep", 0.0))}
-            if positions:
-                self.account_state["positions"] = positions
+            for symbol in self.symbols:
+                self.account_state["positions"][symbol] = positions.get(symbol, {"qty": 0.0, "entry_price": 0.0})
             self.account_state["last_event_ts"] = time.time()
         elif evt == "ORDER_TRADE_UPDATE":
+            order = payload.get("o", {})
+            symbol = str(order.get("s", "")).upper()
+            if symbol in self.symbols:
+                last_fill_qty = float(order.get("l", 0.0) or 0.0)
+                last_fill_price = float(order.get("L", 0.0) or order.get("ap", 0.0) or 0.0)
+                side = str(order.get("S", "")).upper()
+                reduce_only = bool(order.get("R", False))
+                if last_fill_qty > 0 and last_fill_price > 0 and side in {"BUY", "SELL"}:
+                    self.apply_paper_fill(symbol, side, last_fill_qty, last_fill_price, reduce_only=reduce_only)
             self.account_state["last_event_ts"] = time.time()
 
     def apply_paper_fill(self, symbol: str, side: str, qty: float, fill_price: float, reduce_only: bool = False) -> None:
@@ -332,15 +349,11 @@ class DataManager:
 
         klines = self._download_klines(symbol, interval=interval, start_ts=start_ts, end_ts=end_ts, limit=bars)
         if not klines:
-            # fail-safe research fallback when remote data is temporarily unavailable
-            seed = hash((symbol, interval, start_ts, end_ts, bars, regime)) & 0xFFFFFFFF
-            rng = random.Random(seed)
-            px = 100.0 + (abs(hash(symbol)) % 200)
-            klines = []
-            for i in range(bars):
-                drift = rng.uniform(-0.5, 0.5)
-                px = max(0.1, px + drift)
-                klines.append([i, str(px), str(px), str(px), str(px)])
+            log_event(
+                "historical_klines_unavailable",
+                {"symbol": symbol, "interval": interval, "start_ts": start_ts, "end_ts": end_ts, "bars": bars, "regime": regime},
+            )
+            return []
         cache_file.write_text(json.dumps(klines), encoding="utf-8")
         return [float(r[4]) for r in klines]
 

@@ -13,3 +13,13 @@ def test_load_historical_prices_uses_cache(tmp_path):
     assert first == [1.5, 2.0]
     assert second == first
     assert len(list(tmp_path.glob("*.json"))) == 1
+
+
+def test_load_historical_prices_fail_closed_when_remote_unavailable(tmp_path):
+    dm = DataManager(symbols=["BTCUSDT"], cache_dir=str(tmp_path))
+    dm._download_klines = lambda *args, **kwargs: []
+
+    rows = dm.load_historical_prices(symbol="BTCUSDT", regime="RANGE", bars=10)
+
+    assert rows == []
+    assert len(list(tmp_path.glob("*.json"))) == 0

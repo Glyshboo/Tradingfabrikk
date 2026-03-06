@@ -34,6 +34,7 @@
   - Sjekk at `runtime/data_cache/` oppdateres.
   - Bekreft nettverkstilgang til Binance `/fapi/v1/klines`.
   - Kjør research på nytt; manglende cache skal auto-lastes ned.
+  - Merk: systemet bruker ikke syntetiske prisserier som fallback; ved datamangel stoppes analyse fail-closed.
 
 ## Kill switch trigger
 - Symptomer: decisions blokkeres med `kill_switch_triggered`.

@@ -112,6 +112,11 @@ python -m apps.self_check_runner --config configs/active.yaml
 - `scripts/10_strategy_ideas_status.bat`
 - `scripts/99_stop_all.bat`
 
+Windows launcher notes:
+- Alle `.bat` launchere bytter nå alltid working directory til repo root (`cd /d "%~dp0.."`), så de fungerer ved dobbelklikk fra Windows Explorer.
+- Launcherne foretrekker lokal virtualenv (`.venv\Scripts\python.exe`) når den finnes, og fallbacker ellers til `python` i PATH.
+- Direkte-launchere pauser ved feil (ikke ved normal avslutning), og `04_all.bat` holder hvert vindu åpent med tydelig feilmelding hvis en prosess feiler tidlig i oppstart.
+
 ## Runbooks
 - `LIVE_CHECKLIST.md`
 - `TROUBLESHOOTING.md`

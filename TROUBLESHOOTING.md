@@ -28,6 +28,14 @@
   - Bruk reduce-only ved nedskalering/lukking.
   - Ved usikker state: hold pause til konsistent account state er bekreftet.
 
+## Historisk data/cache
+- Symptomer: research/backtest gir få eller ingen bars.
+- Tiltak:
+  - Sjekk at `runtime/data_cache/` oppdateres.
+  - Bekreft nettverkstilgang til Binance `/fapi/v1/klines`.
+  - Kjør research på nytt; manglende cache skal auto-lastes ned.
+- Hvis Binance er utilgjengelig: forvent tomme research-bøtter i stedet for syntetiske priser (fail-closed).
+
 ## Kill switch trigger
 - Symptomer: decisions blokkeres med `kill_switch_triggered`.
 - Tiltak:

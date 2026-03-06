@@ -4,10 +4,13 @@ import argparse
 import json
 import pathlib
 
+from packages.research.candidate_registry import CandidateRegistry
+
 
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--status-file", default="runtime/status.json")
+    parser.add_argument("--registry", default="runtime/candidates_registry.json")
     args = parser.parse_args()
 
     p = pathlib.Path(args.status_file)
@@ -28,6 +31,11 @@ def main() -> None:
         "caps_status": last_decision.get("caps_status", {}),
     }
 
+    registry_summary = {}
+    registry_path = pathlib.Path(args.registry)
+    if registry_path.exists():
+        registry_summary = CandidateRegistry(path=args.registry).report()
+
     view = {
         "mode": status.get("mode"),
         "state": status.get("state"),
@@ -35,9 +43,12 @@ def main() -> None:
         "open_positions": status.get("open_positions", {}),
         "last_decision": decision_view,
         "ws_status": status.get("ws_status", {}),
+        "account_sync_health": status.get("account_sync_health", {}),
+        "current_regime": status.get("current_regime", {}),
         "risk_caps_status": status.get("risk_caps_status", {}),
         "safe_pause": status.get("safe_pause"),
         "reduce_only": status.get("reduce_only"),
+        "candidate_registry": registry_summary,
         "ts": status.get("ts"),
     }
     print(json.dumps(view, indent=2))

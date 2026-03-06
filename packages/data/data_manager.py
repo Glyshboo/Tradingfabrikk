@@ -366,7 +366,7 @@ class DataManager:
                 for row in klines:
                     candle = {
                         "open_time": float(row[0]),
-                        "close_time": float(row[6]),
+                        "close_time": float(row[6] if len(row) > 6 else row[0]),
                         "open": float(row[1]),
                         "high": float(row[2]),
                         "low": float(row[3]),
@@ -378,6 +378,43 @@ class DataManager:
                     "atr": self._compute_atr(symbol, interval, 14),
                     "rsi": self._compute_rsi(symbol, interval, 14),
                 }
+    def load_historical_candles(
+        self,
+        symbol: str,
+        regime: str,
+        start_ts: int | None = None,
+        end_ts: int | None = None,
+        bars: int = 400,
+        interval: str = "1h",
+    ) -> list[dict[str, float]]:
+        symbol = symbol.upper().replace("/", "")
+        if symbol not in self.symbols or bars < 3:
+            return []
+
+        cache_file = self.cache_dir / f"{symbol}_{interval}_{start_ts or 0}_{end_ts or 0}_{bars}.json"
+        if cache_file.exists():
+            payload = json.loads(cache_file.read_text(encoding="utf-8"))
+        else:
+            payload = self._download_klines(symbol, interval=interval, start_ts=start_ts, end_ts=end_ts, limit=bars)
+            if not payload:
+                log_event(
+                    "historical_klines_unavailable",
+                    {"symbol": symbol, "interval": interval, "start_ts": start_ts, "end_ts": end_ts, "bars": bars, "regime": regime},
+                )
+                return []
+            cache_file.write_text(json.dumps(payload), encoding="utf-8")
+        candles = []
+        for row in payload:
+            candles.append({
+                "open_time": float(row[0]),
+                "open": float(row[1]),
+                "high": float(row[2]),
+                "low": float(row[3]),
+                "close": float(row[4]),
+                "close_time": float(row[6] if len(row) > 6 else row[0]),
+            })
+        return candles
+
     def load_historical_prices(
         self,
         symbol: str,
@@ -387,24 +424,8 @@ class DataManager:
         bars: int = 400,
         interval: str = "1h",
     ) -> list[float]:
-        symbol = symbol.upper().replace("/", "")
-        if symbol not in self.symbols or bars < 3:
-            return []
-
-        cache_file = self.cache_dir / f"{symbol}_{interval}_{start_ts or 0}_{end_ts or 0}_{bars}.json"
-        if cache_file.exists():
-            payload = json.loads(cache_file.read_text(encoding="utf-8"))
-            return [float(r[4]) for r in payload]
-
-        klines = self._download_klines(symbol, interval=interval, start_ts=start_ts, end_ts=end_ts, limit=bars)
-        if not klines:
-            log_event(
-                "historical_klines_unavailable",
-                {"symbol": symbol, "interval": interval, "start_ts": start_ts, "end_ts": end_ts, "bars": bars, "regime": regime},
-            )
-            return []
-        cache_file.write_text(json.dumps(klines), encoding="utf-8")
-        return [float(r[4]) for r in klines]
+        candles = self.load_historical_candles(symbol, regime, start_ts=start_ts, end_ts=end_ts, bars=bars, interval=interval)
+        return [float(r["close"]) for r in candles]
 
     def _download_klines(
         self,

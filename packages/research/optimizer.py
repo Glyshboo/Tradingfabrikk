@@ -49,14 +49,14 @@ class ResearchOptimizer:
 
         for symbol in symbols:
             for regime in regimes:
-                prices = data_manager.load_historical_prices(
+                candles = data_manager.load_historical_candles(
                     symbol=symbol,
                     regime=regime,
                     start_ts=start_ts,
                     end_ts=end_ts,
                     bars=int(search_space.get("bars", 400)),
                 )
-                if len(prices) < 3:
+                if len(candles) < 8:
                     continue
 
                 profile = (symbol_profiles or {}).get(symbol)
@@ -65,9 +65,9 @@ class ResearchOptimizer:
                 for strategy_family in strategy_families:
                     for i in range(samples):
                         cfg = self._sample_strategy_config(strategy_family, search_space)
-                        in_sample, out_sample = bt.run_walk_forward(prices, fee_bps=fee_bps, slippage_bps=slippage_bps)
+                        in_sample, out_sample = bt.run_walk_forward(candles, fee_bps=fee_bps, slippage_bps=slippage_bps, strategy_family=strategy_family, strategy_config=cfg)
                         res = out_sample
-                        shape_penalty = cfg.get("atr_stop_mult", 1.0) * 0.01
+                        shape_penalty = cfg.get("atr_stop_mult", 1.0) * 0.01 if strategy_family == "TrendCore" else 0.004
                         score = res.sharpe_like + cfg["base_confidence"] - shape_penalty
                         config_name = f"{symbol.lower()}_{regime.lower()}_{strategy_family.lower()}_{i}"
                         payload = {

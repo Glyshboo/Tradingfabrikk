@@ -44,3 +44,15 @@ def test_weekly_guard_trigger(tmp_path: Path):
     rr = risk.evaluate_order(OrderRequest(symbol="BTCUSDT", side="BUY", qty=0.01), account, {})
     assert rr.allowed is False
     assert rr.reason == "weekly_guard_triggered"
+
+
+def test_candidate_registry_meta_update(tmp_path: Path):
+    from packages.research.candidate_registry import CandidateRegistry
+
+    reg = CandidateRegistry(str(tmp_path / "registry.json"))
+    reg.register("c1", 1.0, {"symbol": "BTCUSDT", "regime": "RANGE"})
+    reg.transition("c1", "config_generated")
+    reg.update_meta("c1", meta_patch={"keep_paper": True}, artifacts_patch={"paper_smoke_result": {"status": "kept"}})
+    rows = reg.list_by_state(["config_generated"])
+    assert rows[0]["meta"]["keep_paper"] is True
+    assert rows[0]["artifacts"]["paper_smoke_result"]["status"] == "kept"

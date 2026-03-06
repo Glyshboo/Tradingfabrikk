@@ -2,13 +2,15 @@ from __future__ import annotations
 
 import asyncio
 import time
-from typing import Dict
 
-from packages.core.models import AccountState, DecisionRecord, OrderRequest, PositionState
+from packages.core.models import AccountState, DecisionRecord, PositionState
+from packages.core.state_store import EngineStateStore
 from packages.data.data_manager import DataManager
 from packages.execution.adapters import BinanceRequestError, ExecutionAdapter, format_order
 from packages.execution.position_manager import PositionManager
 from packages.profiles.symbol_profile import SymbolProfileManager
+from packages.research.candidate_registry import CandidateRegistry
+from packages.review.review_queue import ReviewQueue
 from packages.risk.engine import RiskEngine
 from packages.selector.regime_engine import RegimeEngine
 from packages.selector.strategy_selector import StrategySelector
@@ -22,6 +24,10 @@ class MasterEngine:
     def __init__(self, cfg: dict, execution: ExecutionAdapter):
         self.cfg = cfg
         self.execution = execution
+        self.state_store = EngineStateStore(cfg.get("state", {}).get("engine_state_file", "runtime/engine_state.json"))
+        self.session_info = self.state_store.register_startup()
+        self.engine_state = "recovering"
+
         self.data = DataManager(
             cfg["symbols"],
             stale_after_sec=cfg["engine"]["stale_after_sec"],
@@ -43,25 +49,49 @@ class MasterEngine:
         self.last_decision: dict | None = None
         self.position_mgr = PositionManager()
         self.current_regimes: dict[str, str] = {}
+        self.review_queue = ReviewQueue(cfg.get("review", {}).get("queue_file", "runtime/review_queue.json"))
+        self.candidate_registry = CandidateRegistry(cfg.get("review", {}).get("candidate_registry_file", "runtime/candidates_registry.json"))
+
+        self._load_persistent_state()
 
     async def run(self) -> None:
-        log_event("engine_start", {"mode": self.cfg["mode"]})
+        log_event("engine_start", {"mode": self.cfg["mode"], "session": self.session_info.session_id})
+        await self._recover_before_trading()
         tasks = [
             asyncio.create_task(self.data.run_market_stream()),
             asyncio.create_task(self.data.run_user_stream()),
             asyncio.create_task(self._decision_loop()),
         ]
-        await asyncio.gather(*tasks)
+        try:
+            await asyncio.gather(*tasks)
+        finally:
+            self._persist_state()
+            self.state_store.register_shutdown()
+
+    async def _recover_before_trading(self) -> None:
+        self.engine_state = "recovering"
+        self.data.load_state(self.cfg.get("state", {}).get("data_state_file", "runtime/data_state.json"))
+        self.data.backfill_gap(self.session_info.downtime_sec)
+        if self.cfg.get("mode") == "live":
+            self._sync_account_from_data_state()
+        await asyncio.sleep(float(self.cfg.get("engine", {}).get("recovery_wait_sec", 1.0)))
+        self.engine_state = "auto_resumed"
 
     async def _decision_loop(self) -> None:
         while True:
-            if not self.data.is_healthy():
+            health_ok = self.data.is_healthy() and self.account.known
+            if not health_ok:
+                self.engine_state = "soft_paused"
                 self.risk.trigger_safe_pause()
-                log_event("safe_pause", {"reason": "data_or_user_stream_unhealthy"})
-                log_event("alert", {"severity": "warning", "message": "Data/User stream unhealthy -> trading paused (fail-closed)"})
-                self._write_status("SAFE_PAUSE")
+                self._write_status(self.engine_state)
                 await asyncio.sleep(1)
                 continue
+
+            if self.engine_state in {"soft_paused", "recovering", "auto_resumed"}:
+                if health_ok and not self.risk.reduce_only_mode:
+                    self.engine_state = "running"
+                elif health_ok:
+                    self.engine_state = "auto_resumed"
 
             self.profile_mgr.maybe_update(self.data.market)
             self._sync_account_from_data_state()
@@ -103,7 +133,8 @@ class MasterEngine:
                     continue
                 self.last_decision = decision.as_audit_payload()
                 await self._execute_decision(decision)
-            self._write_status("RUNNING")
+            self._persist_state()
+            self._write_status(self.engine_state)
             await asyncio.sleep(self.cfg["engine"]["decision_interval_sec"])
 
     async def _execute_decision(self, decision: DecisionRecord) -> None:
@@ -122,7 +153,8 @@ class MasterEngine:
             decision.blocked_reason = rr.reason
             self.audit.save_decision(decision)
             log_event("decision_blocked", decision.as_audit_payload())
-            if rr.reason == "kill_switch_triggered":
+            if rr.reason in {"kill_switch_triggered", "weekly_guard_triggered"}:
+                self.engine_state = "hard_paused"
                 await self.risk.panic_flatten(self.account, self.execution)
             return
         order.reduce_only = rr.reduce_only
@@ -131,18 +163,9 @@ class MasterEngine:
         except BinanceRequestError as exc:
             if exc.category in {"auth", "rate_limit", "server", "timeout", "network"}:
                 self.risk.trigger_safe_pause(reduce_only=True)
+                self.engine_state = "soft_paused"
             decision.blocked_reason = f"execution_error:{exc.category}"
             self.audit.save_decision(decision)
-            log_event(
-                "execution_error",
-                {
-                    "symbol": decision.symbol,
-                    "error": str(exc),
-                    "error_category": exc.category,
-                    "safe_pause": self.risk.safe_pause,
-                    "reduce_only": self.risk.reduce_only_mode,
-                },
-            )
             return
         self.audit.save_decision(decision)
         payload = decision.as_audit_payload()
@@ -158,22 +181,13 @@ class MasterEngine:
                 side,
                 qty,
                 fill_price,
-codex/close-the-gap-to-production-ready-architecture-h2uz9x
-                    {
-                        "stop_price": decision.sizing.get("stop_price"),
-                        "take_profit": decision.sizing.get("take_profit"),
-                        "time_stop_bars": decision.sizing.get("time_stop_bars", 0),
-                        "trail_mult": decision.sizing.get("trail_mult", 1.5),
-                    },
-                )
-=======
                 {
                     "stop_price": decision.sizing.get("stop_price"),
                     "take_profit": decision.sizing.get("take_profit"),
                     "time_stop_bars": decision.sizing.get("time_stop_bars", 0),
+                    "trail_mult": decision.sizing.get("trail_mult", 1.5),
                 },
             )
-main
 
     async def _submit_exit(self, symbol: str, reason: str) -> None:
         pos = self.account.positions.get(symbol)
@@ -184,7 +198,6 @@ main
         order = format_order(symbol, side, abs(pos.qty), reduce_only=True)
         rr = self.risk.evaluate_order(order, self.account, self.data.market)
         if not rr.allowed:
-            log_event("exit_blocked", {"symbol": symbol, "reason": rr.reason, "exit_reason": reason})
             return
         await self.execution.place_order(order)
         fill_price = self.data.get_snapshot(symbol).price if self.data.get_snapshot(symbol) else pos.entry_price
@@ -192,7 +205,6 @@ main
             self.data.apply_paper_fill(symbol, side, abs(pos.qty), fill_price, reduce_only=True)
             self._sync_account_from_data_state()
         self.position_mgr.clear(symbol)
-        log_event("position_exit", {"symbol": symbol, "reason": reason, "side": side, "qty": abs(pos.qty)})
 
     def _sync_account_from_data_state(self) -> None:
         if self.data.account_state.get("equity") is not None:
@@ -206,10 +218,23 @@ main
             self.account.positions[sym] = PositionState(symbol=sym, qty=float(row.get("qty", 0.0)), entry_price=float(row.get("entry_price", 0.0)))
         last_event_ts = self.data.account_state.get("last_event_ts")
         if self.cfg.get("mode") == "live":
-            if last_event_ts is None:
-                self.account.known = False
-            else:
-                self.account.known = (time.time() - float(last_event_ts)) <= (self.cfg["engine"]["stale_after_sec"] * 2)
+            self.account.known = bool(last_event_ts and (time.time() - float(last_event_ts)) <= (self.cfg["engine"]["stale_after_sec"] * 2))
+
+    def _load_persistent_state(self) -> None:
+        payload = self.state_store.load()
+        self.position_mgr.state = payload.get("position_manager_state", {})
+        self.risk.import_state(payload.get("risk_state", {}))
+
+    def _persist_state(self) -> None:
+        payload = self.state_store.load()
+        payload["engine_state"] = self.engine_state
+        payload["position_manager_state"] = self.position_mgr.state
+        payload["risk_state"] = self.risk.export_state()
+        payload["symbol_profiles"] = {k: vars(v) for k, v in self.profile_mgr.profiles.items()}
+        payload["candidate_registry_snapshot"] = self.candidate_registry.report()
+        payload["review_queue"] = self.review_queue.list_ready()
+        self.state_store.save(payload)
+        self.data.persist_state(self.cfg.get("state", {}).get("data_state_file", "runtime/data_state.json"))
 
     def _write_status(self, state: str) -> None:
         write_status(
@@ -232,9 +257,14 @@ main
                 "current_regime": self.current_regimes,
                 "safe_pause": self.risk.safe_pause,
                 "reduce_only": self.risk.reduce_only_mode,
+                "candidate_registry": self.candidate_registry.report(),
+                "review_queue_size": len(self.review_queue.list_ready()),
+                "llm_status": {"provider": self.cfg.get("llm", {}).get("provider"), "fallback": self.cfg.get("llm", {}).get("fallback_provider")},
+                "last_review_result_location": "runtime/reviews",
                 "risk_caps_status": {
                     "daily_pnl": self.account.daily_pnl,
                     "daily_loss_cap": self.cfg["risk"]["max_daily_loss"],
+                    "weekly_loss_cap": self.cfg["risk"].get("max_weekly_loss"),
                     "total_exposure_notional": self.risk._exposure(self.account, self.data.market),
                     "total_exposure_cap": self.cfg["risk"]["max_total_exposure_notional"],
                     "leverage": self.account.leverage,

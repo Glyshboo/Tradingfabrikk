@@ -18,6 +18,8 @@ class RiskEngine:
         self.cfg = cfg
         self.safe_pause = False
         self.reduce_only_mode = False
+        self.weekly_pnl = 0.0
+        self.peak_equity = 0.0
 
     def evaluate_order(
         self,
@@ -25,6 +27,7 @@ class RiskEngine:
         account: AccountState,
         snapshots: Dict[str, MarketSnapshot],
     ) -> RiskResult:
+        self.peak_equity = max(self.peak_equity, account.equity)
         if self.safe_pause and not order.reduce_only:
             return RiskResult(False, "safe_pause")
         if self.safe_pause and order.reduce_only:
@@ -35,6 +38,10 @@ class RiskEngine:
             self.safe_pause = True
             self.reduce_only_mode = True
             return RiskResult(False, "kill_switch_triggered", reduce_only=True)
+        if self._weekly_guard(account):
+            self.safe_pause = True
+            self.reduce_only_mode = True
+            return RiskResult(False, "weekly_guard_triggered", reduce_only=True)
         if self._exposure(account, snapshots) > self.cfg["max_total_exposure_notional"]:
             return RiskResult(False, "max_total_exposure")
         if len([p for p in account.positions.values() if abs(p.qty) > 0]) >= self.cfg["max_open_positions"]:
@@ -51,6 +58,12 @@ class RiskEngine:
 
     def _killswitch(self, account: AccountState) -> bool:
         return account.daily_pnl <= -abs(self.cfg["max_daily_loss"])
+
+    def _weekly_guard(self, account: AccountState) -> bool:
+        weekly_cap = abs(float(self.cfg.get("max_weekly_loss", self.cfg["max_daily_loss"] * 3)))
+        drawdown_cap = abs(float(self.cfg.get("max_drawdown_pct", 0.15)))
+        drawdown_now = 0.0 if self.peak_equity <= 0 else max(0.0, (self.peak_equity - account.equity) / self.peak_equity)
+        return self.weekly_pnl <= -weekly_cap or drawdown_now >= drawdown_cap
 
     def _exposure(self, account: AccountState, snapshots: Dict[str, MarketSnapshot]) -> float:
         total = 0.0
@@ -100,3 +113,17 @@ class RiskEngine:
 
     def clear_safe_pause(self) -> None:
         self.safe_pause = False
+
+    def export_state(self) -> dict:
+        return {
+            "safe_pause": self.safe_pause,
+            "reduce_only_mode": self.reduce_only_mode,
+            "weekly_pnl": self.weekly_pnl,
+            "peak_equity": self.peak_equity,
+        }
+
+    def import_state(self, state: dict) -> None:
+        self.safe_pause = bool(state.get("safe_pause", self.safe_pause))
+        self.reduce_only_mode = bool(state.get("reduce_only_mode", self.reduce_only_mode))
+        self.weekly_pnl = float(state.get("weekly_pnl", self.weekly_pnl))
+        self.peak_equity = float(state.get("peak_equity", self.peak_equity))

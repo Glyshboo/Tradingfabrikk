@@ -93,3 +93,13 @@ python -m apps.self_check_runner --config configs/active.yaml
 ## Runbooks
 - `LIVE_CHECKLIST.md`
 - `TROUBLESHOOTING.md`
+
+## Recovery, review and LLM research updates
+
+- Master engine now persists runtime state (`runtime/engine_state.json`) and data state (`runtime/data_state.json`) and starts in `recovering` mode.
+- Engine pause/resume states are: `running`, `soft_paused`, `recovering`, `auto_resumed`, `hard_paused`.
+- On restart, engine registers a new session, computes downtime, backfills missing 1h/4h candles, restores risk/position state, then enters auto-resume.
+- Weekly risk guardrails are enabled with `risk.max_weekly_loss` and `risk.max_drawdown_pct`.
+- Unified review entrypoint: `python -m apps.review_runner --action list` (approve/reject/hold/micro_live via flags).
+- LLM research tooling: `python -m apps.llm_research_runner --prompt "..."` with provider-agnostic config (`llm.provider`, `llm.fallback_provider`).
+- LLM output never deploys live automatically; it only creates review-bound artifacts.

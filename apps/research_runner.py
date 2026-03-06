@@ -7,6 +7,7 @@ from packages.core.config import load_config
 from packages.profiles.symbol_profile import SymbolProfile
 from packages.research.candidate_registry import CandidateRegistry
 from packages.research.optimizer import ResearchOptimizer
+from packages.review.review_queue import ReviewQueue
 
 
 def _load_yaml_or_config(path: str) -> dict:
@@ -84,10 +85,39 @@ def main() -> None:
         top = rows[0]["score"] if rows else "n/a"
         print(f"  {key} -> top_score={top}")
     registry = CandidateRegistry()
+    review_queue = ReviewQueue()
     for rows in ranking.values():
         for row in rows:
-            registry.register(row["id"], row["score"], {"symbol": row["symbol"], "regime": row["regime"]})
+            track = "strict" if row.get("strategy_family") not in {"TrendCore", "RangeMR"} or row.get("code_change") else "fast"
+            registry.register(row["id"], row["score"], {
+                "symbol": row["symbol"],
+                "regime": row["regime"],
+                "track": track,
+                "summary": row.get("summary", "research-generated config candidate"),
+                "backtest_result": row.get("walk_forward"),
+                "config_patch": row.get("strategy_config_patch"),
+                "provider_used": row.get("provider", "research_optimizer"),
+                "risk_notes": row.get("risk_notes", "standard guardrails applied"),
+                "code_change": bool(row.get("code_change", False)),
+            })
             registry.transition(row["id"], "backtest_pass")
+            registry.transition(row["id"], "oos_pass")
+            registry.transition(row["id"], "ready_for_review")
+            review_queue.enqueue({
+                "id": row["id"],
+                "symbol": row["symbol"],
+                "regime": row["regime"],
+                "track": track,
+                "artifacts": {
+                    "summary": "research-generated config candidate",
+                    "backtest_result": row.get("walk_forward"),
+                    "paper_smoke_result": row.get("paper_smoke_result"),
+                    "config_patch": row.get("strategy_config_patch"),
+                    "risk_notes": "standard guardrails applied",
+                    "provider_used": row.get("provider", "research_optimizer"),
+                    "code_change": bool(row.get("code_change", False)),
+                },
+            })
     print(f"Candidate registry: {registry.report()}")
 
 

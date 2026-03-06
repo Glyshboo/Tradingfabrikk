@@ -47,6 +47,9 @@ def main() -> None:
         "safe_pause": status.get("safe_pause"),
         "reduce_only": status.get("reduce_only"),
         "candidate_registry": candidate_report,
+        "review_queue_size": status.get("review_queue_size"),
+        "llm_status": status.get("llm_status", {}),
+        "last_review_result_location": status.get("last_review_result_location"),
         "ts": status.get("ts"),
     }
     print(json.dumps(view, indent=2))

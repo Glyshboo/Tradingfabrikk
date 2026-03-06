@@ -6,7 +6,17 @@ import time
 from dataclasses import dataclass
 
 
-STATES = ["candidate", "backtest_pass", "paper_pass", "ready_for_review", "live_approved"]
+STATES = [
+    "candidate",
+    "backtest_pass",
+    "oos_pass",
+    "paper_pass",
+    "ready_for_review",
+    "paper_hold",
+    "micro_live",
+    "live_approved",
+    "rejected",
+]
 STATE_ORDER = {name: idx for idx, name in enumerate(STATES)}
 
 
@@ -34,13 +44,26 @@ class CandidateRegistry:
     def register(self, candidate_id: str, score: float, meta: dict) -> None:
         data = self._load()
         row = data["candidates"].get(candidate_id, {})
-        row.update({
-            "state": "candidate",
-            "score": score,
-            "meta": meta,
-            "updated_ts": time.time(),
-            "history": row.get("history", []) + [{"state": "candidate", "ts": time.time()}],
-        })
+        now = time.time()
+        row.update(
+            {
+                "state": "candidate",
+                "score": score,
+                "meta": meta,
+                "track": meta.get("track", "fast"),
+                "artifacts": {
+                    "summary": meta.get("summary"),
+                    "backtest_result": meta.get("backtest_result"),
+                    "paper_smoke_result": meta.get("paper_smoke_result"),
+                    "config_patch": meta.get("config_patch"),
+                    "risk_notes": meta.get("risk_notes"),
+                    "provider_used": meta.get("provider_used"),
+                    "code_change": bool(meta.get("code_change", False)),
+                },
+                "updated_ts": now,
+                "history": row.get("history", []) + [{"state": "candidate", "ts": now}],
+            }
+        )
         data["candidates"][candidate_id] = row
         self._save(data)
 
@@ -50,7 +73,9 @@ class CandidateRegistry:
         data = self._load()
         if candidate_id in data["candidates"]:
             current_state = data["candidates"][candidate_id].get("state", "candidate")
-            if STATE_ORDER[state] < STATE_ORDER.get(current_state, 0):
+            if state in {"rejected", "paper_hold", "micro_live", "live_approved"}:
+                pass
+            elif STATE_ORDER[state] < STATE_ORDER.get(current_state, 0):
                 raise ValueError(f"invalid backward transition {current_state} -> {state}")
             data["candidates"][candidate_id]["state"] = state
             data["candidates"][candidate_id]["updated_ts"] = time.time()
@@ -59,6 +84,14 @@ class CandidateRegistry:
             data["candidates"][candidate_id]["history"] = history
             self._save(data)
 
+    def list_ready_for_review(self) -> list[dict]:
+        data = self._load()
+        return [
+            {"id": cid, **row}
+            for cid, row in data["candidates"].items()
+            if row.get("state") == "ready_for_review"
+        ]
+
     def report(self) -> dict:
         data = self._load()
         counts = {s: 0 for s in STATES}
@@ -66,7 +99,7 @@ class CandidateRegistry:
             if row["state"] in counts:
                 counts[row["state"]] += 1
         newest = sorted(
-            [{"id": cid, "state": row.get("state"), "score": row.get("score"), "updated_ts": row.get("updated_ts")} for cid, row in data["candidates"].items()],
+            [{"id": cid, "state": row.get("state"), "score": row.get("score"), "updated_ts": row.get("updated_ts"), "track": row.get("track", "fast")} for cid, row in data["candidates"].items()],
             key=lambda x: x.get("updated_ts") or 0,
             reverse=True,
         )[:10]

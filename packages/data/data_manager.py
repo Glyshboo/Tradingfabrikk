@@ -329,6 +329,55 @@ class DataManager:
             else max(0.0, time.time() - float(self.account_state["last_event_ts"])),
         }
 
+
+    def persist_state(self, path: str = "runtime/data_state.json") -> None:
+        payload = {
+            "account_state": self.account_state,
+            "candles": {
+                sym: {interval: list(series) for interval, series in rows.items()}
+                for sym, rows in self.candles.items()
+            },
+            "last_update_ts": self.last_update_ts,
+        }
+        pathlib.Path(path).write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+    def load_state(self, path: str = "runtime/data_state.json") -> None:
+        state_file = pathlib.Path(path)
+        if not state_file.exists():
+            return
+        payload = json.loads(state_file.read_text(encoding="utf-8"))
+        self.account_state.update(payload.get("account_state", {}))
+        for sym, rows in payload.get("candles", {}).items():
+            if sym in self.candles:
+                for interval, series in rows.items():
+                    if interval in self.candles[sym]:
+                        self.candles[sym][interval].clear()
+                        self.candles[sym][interval].extend(series)
+        self.last_update_ts = payload.get("last_update_ts")
+
+    def backfill_gap(self, downtime_sec: float) -> None:
+        if downtime_sec <= 0:
+            return
+        now_ms = int(time.time() * 1000)
+        start_ms = int((time.time() - downtime_sec - 4 * 3600) * 1000)
+        for symbol in self.symbols:
+            for interval in ("1h", "4h"):
+                klines = self._download_klines(symbol, interval=interval, start_ts=start_ms, end_ts=now_ms, limit=500)
+                for row in klines:
+                    candle = {
+                        "open_time": float(row[0]),
+                        "close_time": float(row[6]),
+                        "open": float(row[1]),
+                        "high": float(row[2]),
+                        "low": float(row[3]),
+                        "close": float(row[4]),
+                        "closed": True,
+                    }
+                    self._append_closed_candle(symbol, interval, candle)
+                self._indicators[symbol][interval] = {
+                    "atr": self._compute_atr(symbol, interval, 14),
+                    "rsi": self._compute_rsi(symbol, interval, 14),
+                }
     def load_historical_prices(
         self,
         symbol: str,

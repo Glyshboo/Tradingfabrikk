@@ -34,6 +34,7 @@
   - Sjekk at `runtime/data_cache/` oppdateres.
   - Bekreft nettverkstilgang til Binance `/fapi/v1/klines`.
   - Kjør research på nytt; manglende cache skal auto-lastes ned.
+  - Merk: systemet bruker ikke syntetiske prisserier som fallback; ved datamangel stoppes analyse fail-closed.
 
 ## Kill switch trigger
 - Symptomer: decisions blokkeres med `kill_switch_triggered`.
@@ -41,3 +42,10 @@
   - Ikke restart blindt. Bekreft faktisk daglig PnL og eksponering.
   - Reduser risiko-parametre før ny oppstart.
   - Kjør self-check før videre drift.
+
+## Candidate pipeline status
+- Symptomer: kandidater står fast i tidlig state.
+- Tiltak:
+  - Sjekk `candidate_registry` i `scripts\05_status.bat` output.
+  - Bekreft at research-runner faktisk skriver nye kandidater og overfører til `backtest_pass`.
+  - Valider state-progresjon uten bakover-transition (registry blokkerer backward transitions).

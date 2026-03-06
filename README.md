@@ -31,6 +31,7 @@ Sjekk status (mode, symbols, open positions, last decision, ws status, account s
 ```bat
 scripts\05_status.bat
 ```
+Status-output inkluderer også `score_components` per kandidat for forklarbar seleksjon og et sammendrag av kandidat-registerets state machine.
 
 ### Going Live (Safe)
 Live krever eksplisitt `mode: live` + egne API keys i miljø. `live_runner` nekter oppstart hvis config ikke er live.
@@ -53,6 +54,7 @@ python -m apps.research_runner --config configs/active.yaml --space configs/rese
 ```
 
 Research/backtest henter nå Binance historical klines og cacher automatisk i `runtime/data_cache/`.
+Hvis historiske Binance-data ikke er tilgjengelig returneres tom serie (ingen syntetisk fallback), slik at research/backtest feiler lukket.
 Candidate-pipeline lagres i `runtime/candidates_registry.json` med states:
 `candidate -> backtest_pass -> paper_pass -> ready_for_review -> live_approved`.
 
@@ -68,6 +70,7 @@ python -m apps.self_check_runner --config configs/active.yaml
 
 ## Sikkerhetsnoter
 - Fail-closed: hvis datafeed/account-state er usikker pauser engine automatisk.
+- Live-path oppdaterer account/position konservativt fra user stream; kun paper-path simulerer fills lokalt.
 - Trading decisions krever aktiv risk engine + decision logging.
 - `panic flatten` er tilgjengelig via engine API og brukes av kill-switch.
 - Paper er default. Sett live bevisst i config + miljøvariabler.

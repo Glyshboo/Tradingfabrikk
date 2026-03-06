@@ -65,7 +65,8 @@ class ResearchOptimizer:
                 for strategy_family in strategy_families:
                     for i in range(samples):
                         cfg = self._sample_strategy_config(strategy_family, search_space)
-                        res = bt.run(prices, fee_bps=fee_bps, slippage_bps=slippage_bps)
+                        in_sample, out_sample = bt.run_walk_forward(prices, fee_bps=fee_bps, slippage_bps=slippage_bps)
+                        res = out_sample
                         shape_penalty = cfg.get("atr_stop_mult", 1.0) * 0.01
                         score = res.sharpe_like + cfg["base_confidence"] - shape_penalty
                         config_name = f"{symbol.lower()}_{regime.lower()}_{strategy_family.lower()}_{i}"
@@ -76,6 +77,10 @@ class ResearchOptimizer:
                             "strategy_family": strategy_family,
                             "score": round(score, 6),
                             "pnl": res.pnl,
+                            "walk_forward": {
+                                "in_sample": {"trades": in_sample.trades, "pnl": in_sample.pnl, "sharpe_like": in_sample.sharpe_like},
+                                "out_sample": {"trades": out_sample.trades, "pnl": out_sample.pnl, "sharpe_like": out_sample.sharpe_like},
+                            },
                             "fees": {"fee_bps": round(fee_bps, 6), "slippage_bps": round(slippage_bps, 6)},
                             "strategy_config_patch": {strategy_family: {config_name: cfg}},
                             "strategy_profile_patch": {symbol: {regime: [[strategy_family, config_name]]}},

@@ -67,6 +67,7 @@ class DecisionRecord:
     regime: str
     eligible_strategies: list[str]
     score_breakdown: Dict[str, float]
+    score_components: Dict[str, Dict[str, float]] = field(default_factory=dict)
     selected_candidate: str = ""
     selected_strategy: str = ""
     selected_config: str = ""
@@ -85,9 +86,11 @@ class DecisionRecord:
             "regime": self.regime,
             "eligible_strategies": list(self.eligible_strategies),
             "score_breakdown": dict(self.score_breakdown),
+            "score_components": {k: dict(v) for k, v in self.score_components.items()},
             "selected_candidate": selected_candidate,
             "selected_strategy": self.selected_strategy,
             "selected_config": self.selected_config,
+            "selected_side": self.selected_side,
             "side": side,
             "qty": self.qty,
             "sizing": dict(self.sizing),

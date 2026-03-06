@@ -41,15 +41,15 @@ def main() -> None:
         raise SystemExit("protected candidate types must remain on strict track")
 
     if args.action == "hold":
-        registry.update_meta(args.candidate_id, meta_patch={"hold_until_ts": time.time() + 15 * 60, "keep_paper": False})
+        registry.update_meta(args.candidate_id, meta_patch={"hold_until_ts": time.time() + 15 * 60, "keep_paper": False, "runtime_hold": True})
     if args.action == "keep_paper":
-        registry.update_meta(args.candidate_id, meta_patch={"keep_paper": True, "hold_until_ts": None})
+        registry.update_meta(args.candidate_id, meta_patch={"keep_paper": True, "hold_until_ts": None, "runtime_hold": False})
     result = queue.apply_action(args.candidate_id, args.action, args.note)
     mapping = {
         "approve_micro_live": "approved_for_micro_live",
         "approve_live_full": "approved_for_live_full",
-        "hold": "paper_smoke_running",
-        "keep_paper": "paper_smoke_running",
+        "hold": "paper_candidate_paused",
+        "keep_paper": "paper_candidate_active",
         "reject": "rejected",
     }
     registry.transition(args.candidate_id, mapping[args.action])

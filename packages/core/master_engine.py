@@ -5,6 +5,7 @@ import json
 import pathlib
 import time
 
+from packages.core.candidate_runtime import CandidateRuntimeOverlayManager
 from packages.core.models import AccountState, DecisionRecord, PositionState
 from packages.core.state_store import EngineStateStore
 from packages.data.data_manager import DataManager
@@ -62,7 +63,11 @@ class MasterEngine:
         self.candidate_registry = CandidateRegistry(cfg.get("review", {}).get("candidate_registry_file", "runtime/candidates_registry.json"))
         self.paper_smoke_worker = PaperSmokeWorker(self.candidate_registry, cfg)
         self.micro_live_cfg = cfg.get("micro_live", {})
+        self.paper_candidate_cfg = cfg.get("paper_candidate", {})
         self.active_micro_live: dict[str, dict] = {}
+        self.active_paper_candidates: dict[str, dict] = {}
+        self.active_live_full: dict[str, dict] = {}
+        self.overlay_mgr = CandidateRuntimeOverlayManager(cfg, micro_live_cfg=self.micro_live_cfg, paper_cfg=self.paper_candidate_cfg)
         self.llm_review_history: list[dict] = []
         self.strategy_performance_history: list[dict] = []
         self.paper_trade_history: list[dict] = []
@@ -100,8 +105,8 @@ class MasterEngine:
         self.engine_state = "auto_resumed"
 
     def _recover_candidate_states(self) -> None:
-        report = self.candidate_registry.report()
-        for row in report.get("latest", []):
+        rows = self.candidate_registry.list_by_state(["micro_live_active", "micro_live_recovering", "micro_live_paused", "approved_for_live_full", "live_full_active", "paper_candidate_active", "paper_candidate_paused"])
+        for row in rows:
             cid = row.get("id")
             if not cid:
                 continue
@@ -111,6 +116,10 @@ class MasterEngine:
                 self.candidate_registry.transition(cid, "micro_live_recovering")
             if state in {"micro_live_recovering", "micro_live_paused"} and not full.get("meta", {}).get("manual_review_required", False):
                 self.candidate_registry.transition(cid, "micro_live_resumed")
+            if state == "live_full_active":
+                self.candidate_registry.transition(cid, "approved_for_live_full")
+            if state == "paper_candidate_active" and self.cfg.get("mode") == "paper":
+                self.candidate_registry.update_meta(cid, meta_patch={"paper_candidate_recovered": True})
 
     def _can_auto_resume(self, hard_pause: bool = False) -> bool:
         if not self.data.is_healthy() or not self.account.known:
@@ -173,10 +182,19 @@ class MasterEngine:
                 if exit_reason:
                     await self._submit_exit(symbol, exit_reason)
                     continue
+                overlay = self.overlay_mgr.resolve(symbol, regime.value)
                 candidates = []
-                for strat_name, config_name in self.cfg["strategy_profiles"].get(symbol, {}).get(regime.value, []):
+                runtime_profiles = overlay.strategy_profiles
+                runtime_configs = overlay.strategy_configs
+                for strat_name, config_name in runtime_profiles.get(symbol, {}).get(regime.value, []):
+                    if strat_name not in self.strategies:
+                        continue
+                    cfg_bucket = runtime_configs.get(strat_name, {})
+                    cfg_row = cfg_bucket.get(config_name)
+                    if not isinstance(cfg_row, dict):
+                        continue
                     strat = self.strategies[strat_name]
-                    signal = strat.generate(snap, regime, self.cfg["strategy_configs"][strat_name][config_name])
+                    signal = strat.generate(snap, regime, cfg_row)
                     if signal:
                         candidates.append((strat_name, config_name, signal))
                 cost_proxy = {
@@ -197,7 +215,17 @@ class MasterEngine:
                     current_positions={s: p.qty for s, p in self.account.positions.items()},
                 )
                 if not decision:
+                    if overlay.blocker:
+                        self.last_decision = {
+                            "symbol": symbol,
+                            "regime": regime.value,
+                            "blocked_reason": overlay.blocker,
+                            "runtime_model": "baseline",
+                            "overlay_candidate_id": "",
+                        }
                     continue
+                decision.runtime_model = overlay.runtime_model
+                decision.overlay_candidate_id = overlay.candidate_id or ""
                 self.last_decision = decision.as_audit_payload()
                 await self._execute_decision(decision)
                 self.symbol_activity[symbol] = time.time()
@@ -216,11 +244,9 @@ class MasterEngine:
         return hot + cold
 
     def _sync_candidate_state_machine(self) -> None:
-        if not self.micro_live_cfg.get("enabled", False):
-            return
-        approved = self.candidate_registry.list_by_state(["approved_for_micro_live", "micro_live_recovering", "micro_live_resumed", "micro_live_active"])
+        approved_micro = self.candidate_registry.list_by_state(["approved_for_micro_live", "micro_live_recovering", "micro_live_resumed", "micro_live_active"])
         self.active_micro_live = {}
-        for row in approved:
+        for row in approved_micro:
             cid = row.get("id")
             if not cid:
                 continue
@@ -230,30 +256,68 @@ class MasterEngine:
             if state in {"approved_for_micro_live", "micro_live_resumed", "micro_live_recovering"}:
                 self.candidate_registry.transition(cid, "micro_live_active")
 
+        self.active_live_full = {}
+        for row in self.candidate_registry.list_by_state(["approved_for_live_full", "live_full_active"]):
+            cid = row.get("id")
+            if not cid:
+                continue
+            symbols = row.get("symbols") or row.get("meta", {}).get("symbols") or []
+            self.active_live_full[cid] = {"symbols": symbols, "state": row.get("state"), "started_ts": row.get("updated_ts")}
+            if self.cfg.get("mode") == "live" and row.get("state") == "approved_for_live_full":
+                self.candidate_registry.transition(cid, "live_full_active")
+
+        self.active_paper_candidates = {}
+        for row in self.candidate_registry.list_by_state(["paper_candidate_active", "paper_candidate_paused"]):
+            cid = row.get("id")
+            if not cid:
+                continue
+            symbols = row.get("symbols") or row.get("meta", {}).get("symbols") or []
+            self.active_paper_candidates[cid] = {"symbols": symbols, "state": row.get("state"), "started_ts": row.get("updated_ts")}
+
+        runtime_rows = approved_micro + list(self.candidate_registry.list_by_state(["approved_for_live_full", "live_full_active", "paper_candidate_active", "paper_candidate_paused"]))
+        self.overlay_mgr.rebuild(runtime_rows, self.cfg.get("mode", "paper"))
+        self._evaluate_paper_candidates()
+
     def _micro_live_context_for_symbol(self, symbol: str) -> dict | None:
-        if not self.active_micro_live:
-            return None
-        candidates = []
-        for cid, row in self.active_micro_live.items():
-            symbols = row.get("symbols") or []
-            if not symbols or symbol in symbols or symbols == ["MULTI"]:
-                candidates.append({"id": cid, **row})
-        if not candidates:
+        cids = [cid for cid in self.overlay_mgr.status().get("by_symbol", {}).get(symbol, []) if self.overlay_mgr.active.get(cid, {}).get("lane") == "micro_live"]
+        if not cids and self.active_micro_live:
+            for cid, row in self.active_micro_live.items():
+                symbols = row.get("symbols") or []
+                if not symbols or symbol in symbols or symbols == ["MULTI"]:
+                    cids.append(cid)
+        if not cids:
             return None
         if self.micro_live_cfg.get("max_symbols", 0) == 1:
             scoped = set()
-            for cand in self.active_micro_live.values():
-                for sym in (cand.get("symbols") or [symbol]):
+            source = self.active_micro_live or {cid: self.overlay_mgr.active.get(cid, {}) for cid in cids}
+            for row in source.values():
+                for sym in (row.get("symbols") or [symbol]):
                     if sym != "MULTI":
                         scoped.add(sym)
             if len(scoped) > 1:
-                return {"blocked": True, "reason": "micro_live_one_symbol_only"}
-        return {"blocked": False, "candidates": candidates}
+                return {"blocked": True, "reason": "micro_live_one_symbol_only", "candidates": cids}
+        return {"blocked": False, "candidates": cids}
+
+    def _evaluate_paper_candidates(self) -> None:
+        if self.cfg.get("mode") != "paper":
+            return
+        window_sec = float(self.paper_candidate_cfg.get("window_sec", 300) or 300)
+        min_trades = int(self.paper_candidate_cfg.get("min_trades", 1) or 1)
+        now = time.time()
+        for cid, row in self.active_paper_candidates.items():
+            if row.get("state") != "paper_candidate_active":
+                continue
+            started = float(row.get("started_ts") or now)
+            if now - started < window_sec:
+                continue
+            trades = [x for x in self.paper_trade_history if x.get("overlay_candidate_id") == cid and now - float(x.get("ts", 0)) <= window_sec]
+            next_state = "paper_candidate_pass" if len(trades) >= min_trades else "paper_candidate_fail"
+            self.candidate_registry.transition(cid, next_state)
 
     async def _execute_decision(self, decision: DecisionRecord) -> None:
         side = decision.selected_side
         micro_ctx = self._micro_live_context_for_symbol(decision.symbol)
-        risk_mult = float(self.micro_live_cfg.get("risk_multiplier", 1.0)) if micro_ctx else 1.0
+        risk_mult = float(self.micro_live_cfg.get("risk_multiplier", 1.0)) if micro_ctx and not micro_ctx.get("blocked") else 1.0
         qty = max(0.0, self.cfg["sizing"]["base_qty"] * decision.sizing["confidence"] * risk_mult)
         decision.side = side
         decision.qty = qty
@@ -269,7 +333,12 @@ class MasterEngine:
             "reduce_only_mode": self.risk.reduce_only_mode,
             "risk_result": rr.reason,
             "micro_live": micro_ctx or {},
+            "runtime_model": decision.runtime_model,
+            "overlay_candidate_id": decision.overlay_candidate_id,
         }
+        if micro_ctx and micro_ctx.get("blocked"):
+            rr.allowed = False
+            rr.reason = micro_ctx.get("reason", "micro_live_blocked")
         if not rr.allowed:
             decision.blocked_reason = rr.reason
             self.audit.save_decision(decision)
@@ -292,12 +361,12 @@ class MasterEngine:
             return
         self.audit.save_decision(decision)
         payload = decision.as_audit_payload()
-        trade_row = {"ts": time.time(), "symbol": decision.symbol, "side": side, "qty": qty, "mode": self.cfg.get("mode"), "micro_live": bool(micro_ctx)}
+        trade_row = {"ts": time.time(), "symbol": decision.symbol, "side": side, "qty": qty, "mode": self.cfg.get("mode"), "micro_live": bool(micro_ctx), "runtime_model": decision.runtime_model, "overlay_candidate_id": decision.overlay_candidate_id}
         if self.cfg.get("mode") == "paper":
             self.paper_trade_history.append(trade_row)
         else:
             self.live_trade_history.append(trade_row)
-        self.strategy_performance_history.append({"ts": time.time(), "symbol": decision.symbol, "strategy": decision.selected_strategy, "config": decision.selected_config, "qty": qty, "side": side, "blocked": False})
+        self.strategy_performance_history.append({"ts": time.time(), "symbol": decision.symbol, "strategy": decision.selected_strategy, "config": decision.selected_config, "qty": qty, "side": side, "blocked": False, "runtime_model": decision.runtime_model, "overlay_candidate_id": decision.overlay_candidate_id})
         payload["caps_status"]["reduce_only_order"] = order.reduce_only
         payload["result"] = res
         log_event("order_submitted", payload)
@@ -360,6 +429,9 @@ class MasterEngine:
         self.paper_trade_history = payload.get("paper_trade_history", [])[-500:]
         self.live_trade_history = payload.get("live_trade_history", [])[-500:]
         self.review_context = payload.get("review_context", {})
+        self.active_micro_live = payload.get("micro_live_active", {})
+        self.active_paper_candidates = payload.get("paper_candidate_active", {})
+        self.active_live_full = payload.get("live_full_active", {})
 
     def _persist_state(self) -> None:
         payload = self.state_store.load()
@@ -375,6 +447,9 @@ class MasterEngine:
         payload["live_trade_history"] = self.live_trade_history[-500:]
         payload["review_context"] = self.review_context
         payload["micro_live_active"] = self.active_micro_live
+        payload["paper_candidate_active"] = self.active_paper_candidates
+        payload["live_full_active"] = self.active_live_full
+        payload["runtime_overlay_status"] = self.overlay_mgr.status()
         self.state_store.save(payload)
         self.data.persist_state(self.cfg.get("state", {}).get("data_state_file", "runtime/data_state.json"))
 
@@ -422,6 +497,9 @@ class MasterEngine:
                     "budget_usage": budget_runtime,
                 },
                 "micro_live": {"enabled": self.micro_live_cfg.get("enabled", False), "active": self.active_micro_live},
+                "paper_candidate": {"active": self.active_paper_candidates, "config": self.paper_candidate_cfg},
+                "live_full": {"active": self.active_live_full},
+                "runtime_overlays": self.overlay_mgr.status(),
                 "bootstrap": {
                     "idea_library_total": self.idea_library.get("total", 0),
                     "implemented_plugins": [x.get("family") for x in self.idea_library.get("implemented_plugins", [])],

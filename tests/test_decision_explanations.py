@@ -82,3 +82,16 @@ def test_decision_blocked_includes_full_explanation(tmp_path):
     payload = [p for evt, p in events if evt == "decision_blocked"][0]
     assert REQUIRED_FIELDS.issubset(payload.keys())
     assert payload["blocked_reason"] == "safe_pause"
+
+
+def test_decision_blocked_when_confidence_missing(tmp_path):
+    engine = MasterEngine(_cfg(tmp_path), PaperExecutionAdapter())
+    engine.data.market["BTCUSDT"] = MarketSnapshot(symbol="BTCUSDT", price=100, bid=99, ask=101)
+    decision = _decision()
+    decision.sizing = {}
+    events = []
+    with patch("packages.core.master_engine.log_event", side_effect=lambda evt, payload: events.append((evt, payload))):
+        asyncio.run(engine._execute_decision(decision))
+
+    payload = [p for evt, p in events if evt == "decision_blocked"][0]
+    assert payload["blocked_reason"] == "invalid_sizing_confidence"

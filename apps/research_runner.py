@@ -12,6 +12,7 @@ from packages.core.config import load_config
 from packages.profiles.symbol_profile import SymbolProfile
 from packages.research.candidate_registry import CandidateRegistry
 from packages.research.optimizer import ResearchOptimizer
+from packages.research.strategy_ideas import StrategyIdeaLibrary
 from packages.review.review_queue import ReviewQueue
 
 
@@ -64,6 +65,10 @@ def main() -> None:
         or space.get("strategy_families")
         or list(active_cfg.get("strategy_configs", {}).keys())
     )
+    ideas = StrategyIdeaLibrary().report()
+    implemented_idea_families = sorted({row.get("family") for row in ideas.get("implemented_plugins", []) if row.get("family")})
+    if not args.strategy_families and implemented_idea_families:
+        strategy_families = [fam for fam in strategy_families if fam in implemented_idea_families] or implemented_idea_families
 
     symbol_profiles = {
         symbol: SymbolProfile(
@@ -124,6 +129,7 @@ def main() -> None:
                         "provider": row.get("provider", "research_optimizer"),
                         "generated_ts": time.time(),
                         "bundle_source": "research_runner",
+                        "idea_library_id": row.get("idea_id"),
                     },
                     indent=2,
                 ),
@@ -145,6 +151,7 @@ def main() -> None:
                 "risk_notes": row.get("risk_notes", "standard guardrails applied"),
                 "validation_report": validation_report,
                 "artifact_bundle": str(candidate_dir),
+                "idea_id": row.get("idea_id"),
                 "code_change": bool(row.get("code_change", False)),
             })
             registry.transition(row["id"], "config_generated")
@@ -170,7 +177,19 @@ def main() -> None:
                     "bundle": str(candidate_dir),
                 },
             })
-    print(f"Candidate registry: {registry.report()}")
+    bootstrap = {
+        "idea_library": {
+            "total": ideas.get("total", 0),
+            "implemented": len(ideas.get("implemented_plugins", [])),
+            "strict_track_candidates": len(ideas.get("strict_track_candidates", [])),
+        },
+        "research_focus": {
+            "symbols": symbols,
+            "regimes": regimes,
+            "strategy_families": strategy_families,
+        },
+    }
+    print(json.dumps({"candidate_registry": registry.report(), "bootstrap": bootstrap}, indent=2))
 
 
 if __name__ == "__main__":

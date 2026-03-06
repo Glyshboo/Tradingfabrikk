@@ -1,0 +1,15 @@
+{
+  "id": "idea_vwap_reversion_intraday",
+  "name": "VWAP Intraday Reversion",
+  "family": "VWAPReversion",
+  "description": "Fade stretched distance from session VWAP when flow normalizes.",
+  "typical_market_regimes": ["RANGE"],
+  "common_indicators": ["VWAP", "Z-Score", "ATR"],
+  "tunable_parameters": {"z_entry": [1.5, 2.0, 2.5], "z_exit": [0.3, 0.5, 0.8]},
+  "symbol_fit_notes": "High-liquidity majors; avoid macro release windows.",
+  "known_strengths": ["clear mean target"],
+  "known_weaknesses": ["can blow out in trend days"],
+  "implementation_status": "idea_only",
+  "source_type": "seed",
+  "bootstrap_priority": 0.73
+}

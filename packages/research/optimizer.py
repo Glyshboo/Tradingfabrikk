@@ -11,6 +11,7 @@ import yaml
 from packages.backtest.engine import CandleBacktester
 from packages.data.data_manager import DataManager
 from packages.profiles.symbol_profile import SymbolProfile, effective_backtest_costs
+from packages.research.strategy_ideas import StrategyIdeaLibrary
 
 
 class ResearchOptimizer:
@@ -45,6 +46,7 @@ class ResearchOptimizer:
     ) -> Dict[str, List[Dict]]:
         bt = CandleBacktester()
         data_manager = DataManager(symbols=symbols)
+        idea_rows = StrategyIdeaLibrary().load()
         by_tuple: Dict[tuple[str, str], List[Dict]] = defaultdict(list)
 
         for symbol in symbols:
@@ -84,6 +86,7 @@ class ResearchOptimizer:
                             "fees": {"fee_bps": round(fee_bps, 6), "slippage_bps": round(slippage_bps, 6)},
                             "strategy_config_patch": {strategy_family: {config_name: cfg}},
                             "strategy_profile_patch": {symbol: {regime: [[strategy_family, config_name]]}},
+                            "idea_id": next((x.get("id") for x in idea_rows if x.get("family") == strategy_family and regime in (x.get("typical_market_regimes") or [])), None),
                         }
                         by_tuple[(symbol, regime)].append(payload)
                         outfile = self.out_dir / f"{config_name}.json"

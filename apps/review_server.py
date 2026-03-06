@@ -53,6 +53,9 @@ async function loadCandidates(){
         <span class='pill'>provider:${c.provider || 'unknown'}</span>
       </div>
       <div>symbols: ${symbols} | regimes: ${regimes} | strategy: ${c.strategy_family || '-'}</div>
+      <div>backtest: ${JSON.stringify(c.backtest_result || c.artifacts?.backtest_result || null)} </div>
+      <div>oos: ${JSON.stringify(c.oos_result || c.artifacts?.oos_result || null)} | paper_smoke: ${JSON.stringify(c.paper_smoke_result || c.artifacts?.paper_smoke_result || null)}</div>
+      <div>risk_notes: ${c.risk_notes || c.artifacts?.risk_notes || '-'} </div>
       <div>recommendation: ${c.recommendation || '-'} | warnings: ${(c.warnings || []).join('; ')}</div>
       <div class='row'>
         <button onclick="act('${c.id}','approve_micro_live')">Approve micro-live</button>

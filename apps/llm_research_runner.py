@@ -9,6 +9,7 @@ from packages.core.config import load_config
 from packages.core.state_store import EngineStateStore
 from packages.llm.research import LLMResearchService
 from packages.research.candidate_registry import CandidateRegistry
+from packages.research.strategy_ideas import StrategyIdeaLibrary
 from packages.review.review_queue import ReviewQueue
 
 
@@ -17,6 +18,7 @@ def _compact_research_bundle(status_file: str) -> dict:
     status = json.loads(status_path.read_text(encoding="utf-8")) if status_path.exists() else {}
     candidate_report = CandidateRegistry().report()
     queue_rows = ReviewQueue().list_ready()[:10]
+    ideas = StrategyIdeaLibrary().report()
     return {
         "recent_performance": status.get("risk_caps_status", {}),
         "regime_distribution": status.get("current_regime", {}),
@@ -31,6 +33,11 @@ def _compact_research_bundle(status_file: str) -> dict:
         },
         "paper_micro_live_outcomes": candidate_report.get("latest", []),
         "review_queue": queue_rows,
+        "strategy_idea_library": {
+            "implemented_plugins": ideas.get("implemented_plugins", []),
+            "idea_only_top": ideas.get("idea_only", [])[:8],
+            "strict_track_candidates": ideas.get("strict_track_candidates", [])[:8],
+        },
     }
 
 
@@ -46,6 +53,11 @@ def main() -> None:
     svc = LLMResearchService(llm_cfg)
     bundle = _compact_research_bundle(args.status_file)
     artifact = svc.research(args.prompt, bundle=bundle)
+    structured = artifact.get("structured", {})
+    warnings = structured.get("warnings") or []
+    code_level = any("code" in str(x).lower() for x in warnings) or bool(structured.get("proposed_code_patch"))
+    candidate_type = "code" if code_level else ("search-space" if structured.get("search_space_patch") else "config")
+    track = "strict" if candidate_type == "code" else "fast"
 
     candidate_id = f"llm_{artifact['id'][:10]}"
     registry = CandidateRegistry()
@@ -65,8 +77,8 @@ def main() -> None:
             "regime": "MIXED",
             "symbols": ["MULTI"],
             "regimes": ["MIXED"],
-            "candidate_type": "code",
-            "track": "strict",
+            "candidate_type": candidate_type,
+            "track": track,
             "summary": artifact["summary"][:500],
             "diagnosis": artifact.get("structured", {}).get("diagnosis", ""),
             "backtest_result": None,
@@ -76,7 +88,7 @@ def main() -> None:
             "provider_used": artifact["provider"],
             "validation_report": {"llm_only": True, "auto_deploy": False, "budget": artifact.get("budget", {})},
             "artifact_bundle": str(candidate_dir),
-            "code_change": True,
+            "code_change": code_level,
         },
     )
     registry.transition(candidate_id, "config_generated")
@@ -84,8 +96,8 @@ def main() -> None:
     queue.enqueue(
         {
             "id": candidate_id,
-            "type": "code",
-            "track": "strict",
+            "type": candidate_type,
+            "track": track,
             "symbols": ["MULTI"],
             "regimes": ["MIXED"],
             "strategy_family": "LLMProposal",
@@ -93,7 +105,7 @@ def main() -> None:
             "backtest_result": None,
             "oos_result": None,
             "paper_smoke_result": None,
-            "risk_notes": "manual strict review required",
+            "risk_notes": "manual strict review required" if track == "strict" else "manual review required",
             "config_patch": artifact.get("structured", {}).get("config_patch") or {},
             "warnings": (artifact.get("structured", {}).get("warnings") or []) + ["LLM-generated idea; deterministic validation required"],
             "recommendation": "hold_for_validation",

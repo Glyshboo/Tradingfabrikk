@@ -1,0 +1,15 @@
+{
+  "id": "idea_trend_ema_continuation",
+  "name": "EMA Trend Continuation",
+  "family": "TrendCore",
+  "description": "Ride directional trends using EMA slope/alignment and ATR-based stops.",
+  "typical_market_regimes": ["TREND_UP", "TREND_DOWN"],
+  "common_indicators": ["EMA", "ATR", "ADX"],
+  "tunable_parameters": {"fast_ema": [8, 13, 21], "slow_ema": [34, 55, 89], "atr_stop_mult": [1.5, 2.0, 2.5]},
+  "symbol_fit_notes": "ALL liquid perp symbols; best on BTCUSDT/ETHUSDT/SOLUSDT.",
+  "known_strengths": ["simple", "robust in trend"],
+  "known_weaknesses": ["chop whipsaw"],
+  "implementation_status": "implemented_plugin",
+  "source_type": "seed",
+  "bootstrap_priority": 0.9
+}

@@ -25,6 +25,16 @@ micro_live:
 sizing:
   base_qty: 0.01
 
+paper_smoke:
+  interval: 1h
+  bars: 48
+  min_trades: 3
+  min_pnl: -2.0
+
+scheduler:
+  enabled: false
+  hot_window_sec: 600
+
 risk:
   max_daily_loss: 300
   max_weekly_loss: 700

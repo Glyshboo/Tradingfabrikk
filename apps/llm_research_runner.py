@@ -6,6 +6,7 @@ import pathlib
 import time
 
 from packages.core.config import load_config
+from packages.core.state_store import EngineStateStore
 from packages.llm.research import LLMResearchService
 from packages.research.candidate_registry import CandidateRegistry
 from packages.review.review_queue import ReviewQueue
@@ -49,6 +50,13 @@ def main() -> None:
     candidate_id = f"llm_{artifact['id'][:10]}"
     registry = CandidateRegistry()
     queue = ReviewQueue()
+    artifact_root = pathlib.Path("runtime/review_artifacts")
+    artifact_root.mkdir(parents=True, exist_ok=True)
+    candidate_dir = artifact_root / candidate_id
+    candidate_dir.mkdir(parents=True, exist_ok=True)
+    (candidate_dir / "summary.md").write_text(f"# {candidate_id}\n\n{artifact.get('summary','')}\n", encoding="utf-8")
+    (candidate_dir / "structured.json").write_text(json.dumps(artifact.get("structured", {}), indent=2), encoding="utf-8")
+    (candidate_dir / "validation_report.json").write_text(json.dumps({"llm_only": True, "auto_deploy": False, "budget": artifact.get("budget", {})}, indent=2), encoding="utf-8")
     registry.register(
         candidate_id,
         score=0.0,
@@ -60,12 +68,14 @@ def main() -> None:
             "candidate_type": "code",
             "track": "strict",
             "summary": artifact["summary"][:500],
+            "diagnosis": artifact.get("structured", {}).get("diagnosis", ""),
             "backtest_result": None,
             "oos_result": None,
-            "config_patch": None,
+            "config_patch": artifact.get("structured", {}).get("config_patch") or {},
             "risk_notes": "requires manual validation; LLM output never auto-deploys",
             "provider_used": artifact["provider"],
-            "validation_report": {"llm_only": True, "auto_deploy": False},
+            "validation_report": {"llm_only": True, "auto_deploy": False, "budget": artifact.get("budget", {})},
+            "artifact_bundle": str(candidate_dir),
             "code_change": True,
         },
     )
@@ -84,12 +94,27 @@ def main() -> None:
             "oos_result": None,
             "paper_smoke_result": None,
             "risk_notes": "manual strict review required",
-            "config_patch": None,
-            "warnings": ["LLM-generated idea; deterministic validation required"],
+            "config_patch": artifact.get("structured", {}).get("config_patch") or {},
+            "warnings": (artifact.get("structured", {}).get("warnings") or []) + ["LLM-generated idea; deterministic validation required"],
             "recommendation": "hold_for_validation",
+            "structured": artifact.get("structured", {}),
             "created_ts": time.time(),
         }
     )
+
+    state_store = EngineStateStore(cfg.get("state", {}).get("engine_state_file", "runtime/engine_state.json"))
+    payload = state_store.load()
+    history = payload.get("llm_review_history", [])
+    history.append({
+        "candidate_id": candidate_id,
+        "artifact_path": artifact.get("artifact_path"),
+        "provider": artifact.get("provider"),
+        "structured": artifact.get("structured", {}),
+        "budget": artifact.get("budget", {}),
+        "ts": time.time(),
+    })
+    payload["llm_review_history"] = history[-200:]
+    state_store.save(payload)
     print(json.dumps({"artifact": artifact, "candidate_id": candidate_id}, indent=2))
 
 

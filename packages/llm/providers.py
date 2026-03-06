@@ -11,6 +11,7 @@ from urllib import request
 class LLMResponse:
     provider: str
     summary: str
+    raw_text: str = ""
 
 
 class LLMProvider(Protocol):
@@ -28,6 +29,7 @@ class OpenAIProvider:
         body = {
             "model": self.model,
             "input": prompt,
+            "text": {"format": {"type": "json_object"}},
         }
         req = request.Request(
             "https://api.openai.com/v1/responses",
@@ -35,10 +37,10 @@ class OpenAIProvider:
             headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"},
             data=json.dumps(body).encode("utf-8"),
         )
-        with request.urlopen(req, timeout=15) as resp:
+        with request.urlopen(req, timeout=20) as resp:
             payload = json.loads(resp.read().decode("utf-8"))
         text = payload.get("output_text") or ""
-        return LLMResponse(provider="openai", summary=text.strip())
+        return LLMResponse(provider="openai", summary=text.strip()[:280], raw_text=text.strip())
 
 
 class AnthropicProvider:
@@ -51,7 +53,7 @@ class AnthropicProvider:
             raise RuntimeError("missing ANTHROPIC_API_KEY")
         body = {
             "model": self.model,
-            "max_tokens": 700,
+            "max_tokens": 900,
             "messages": [{"role": "user", "content": prompt}],
         }
         req = request.Request(
@@ -64,10 +66,11 @@ class AnthropicProvider:
             },
             data=json.dumps(body).encode("utf-8"),
         )
-        with request.urlopen(req, timeout=15) as resp:
+        with request.urlopen(req, timeout=20) as resp:
             payload = json.loads(resp.read().decode("utf-8"))
         text = ""
         for item in payload.get("content", []):
             if item.get("type") == "text":
                 text += item.get("text", "")
-        return LLMResponse(provider="anthropic", summary=text.strip())
+        txt = text.strip()
+        return LLMResponse(provider="anthropic", summary=txt[:280], raw_text=txt)

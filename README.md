@@ -114,3 +114,14 @@ python -m apps.self_check_runner --config configs/active.yaml
 - Review artifacts per candidate are stored in `runtime/review_artifacts/<candidate_id>/` (`summary.md`, `metrics.json`, `config_patch.yaml`, `risk_notes.md`, `provenance.json`, `validation_report.json`).
 - LLM research tooling: `python -m apps.llm_research_runner --prompt "..."` with provider-agnostic config (`llm_research.provider`, `llm_research.fallback_provider`, aliases: `codex/openai`, `claude/anthropic`).
 - LLM output never deploys live automatically; it only creates review-bound artifacts.
+
+## New conservative architecture wiring
+
+- **Micro-live is now a real runtime mode**, not just labels: approved candidates are tracked as active in engine status, enforced with tighter caps (`micro_live.max_total_exposure_notional`), lower sizing (`micro_live.risk_multiplier`), optional one-symbol scope, and pause/resume/recovery transitions across restarts.
+- **Paper-smoke is now executable** via a lightweight worker that consumes `paper_smoke_running` candidates and transitions to `paper_smoke_pass` or `validation_failed` from actual short historical smoke results.
+- **`hold` and `keep_paper` now have behavior**: `hold` sets a temporary hold window before smoke evaluation; `keep_paper` keeps candidates in paper-smoke track without silent promotion.
+- **Backtesting is strategy-aware** for `TrendCore` and `RangeMR` using real candle OHLC simulation with walk-forward/OOS preserved.
+- **LLM output is normalized to structured schema** (`summary`, `diagnosis`, `proposed_actions`, `config_patch`, `search_space_patch`, `confidence`, `warnings`) across providers and fail-closed on weak/unavailable output.
+- **LLM budgets are enforced and persisted** (`max_calls_per_day`, `max_calls_per_week`) with usage history in `runtime/llm_budget.json`; budget status is included in artifacts/status.
+- **State rehydration finished for practical runtime history**: symbol profiles, llm review history, strategy performance history, and paper/live trade histories are persisted/restored.
+- **Optional conservative symbol scheduler** added (`scheduler.enabled`) with simple hot/cold ordering and disabled by default.

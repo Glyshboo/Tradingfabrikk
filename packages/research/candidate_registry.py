@@ -100,6 +100,32 @@ class CandidateRegistry:
             data["candidates"][candidate_id]["history"] = history
             self._save(data)
 
+    def list_by_state(self, states: list[str]) -> list[dict]:
+        data = self._load()
+        allowed = set(states)
+        rows = []
+        for cid, row in data["candidates"].items():
+            if row.get("state") in allowed:
+                rows.append({"id": cid, **row})
+        return sorted(rows, key=lambda r: r.get("updated_ts", 0), reverse=True)
+
+    def update_meta(self, candidate_id: str, meta_patch: dict | None = None, artifacts_patch: dict | None = None) -> None:
+        data = self._load()
+        row = data["candidates"].get(candidate_id)
+        if row is None:
+            return
+        if meta_patch:
+            meta = row.get("meta", {})
+            meta.update(meta_patch)
+            row["meta"] = meta
+        if artifacts_patch:
+            artifacts = row.get("artifacts", {})
+            artifacts.update(artifacts_patch)
+            row["artifacts"] = artifacts
+        row["updated_ts"] = time.time()
+        data["candidates"][candidate_id] = row
+        self._save(data)
+
     def list_ready_for_review(self) -> list[dict]:
         data = self._load()
         return [

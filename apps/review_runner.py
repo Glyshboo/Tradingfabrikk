@@ -3,8 +3,10 @@ from __future__ import annotations
 import argparse
 import json
 import pathlib
+import time
 
 from packages.research.candidate_registry import CandidateRegistry
+from packages.review.paper_smoke import PaperSmokeWorker
 from packages.review.review_queue import ReviewQueue
 
 
@@ -38,6 +40,10 @@ def main() -> None:
     if record.get("type") in {"risk", "execution", "code"} and record.get("track") != "strict":
         raise SystemExit("protected candidate types must remain on strict track")
 
+    if args.action == "hold":
+        registry.update_meta(args.candidate_id, meta_patch={"hold_until_ts": time.time() + 15 * 60, "keep_paper": False})
+    if args.action == "keep_paper":
+        registry.update_meta(args.candidate_id, meta_patch={"keep_paper": True, "hold_until_ts": None})
     result = queue.apply_action(args.candidate_id, args.action, args.note)
     mapping = {
         "approve_micro_live": "approved_for_micro_live",
@@ -47,12 +53,14 @@ def main() -> None:
         "reject": "rejected",
     }
     registry.transition(args.candidate_id, mapping[args.action])
+    worker = PaperSmokeWorker(registry, {"symbols": record.get("symbols") or [record.get("meta", {}).get("symbol", "MULTI")]})
+    smoke_actions = worker.process()
 
     out = pathlib.Path("runtime/reviews")
     out.mkdir(parents=True, exist_ok=True)
     review_file = out / f"{args.candidate_id}_{args.action}.json"
     review_file.write_text(json.dumps(result, indent=2), encoding="utf-8")
-    print(json.dumps({"result": result, "review_file": str(review_file)}, indent=2))
+    print(json.dumps({"result": result, "review_file": str(review_file), "paper_smoke_actions": smoke_actions}, indent=2))
 
 
 if __name__ == "__main__":

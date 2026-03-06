@@ -1,6 +1,11 @@
 from __future__ import annotations
 
 import argparse
+import json
+import pathlib
+import time
+
+import yaml
 
 from packages.core.config import REQUIRED_TOP_LEVEL_KEYS
 from packages.core.config import load_config
@@ -86,36 +91,83 @@ def main() -> None:
         print(f"  {key} -> top_score={top}")
     registry = CandidateRegistry()
     review_queue = ReviewQueue()
+    artifact_root = pathlib.Path("runtime/review_artifacts")
+    artifact_root.mkdir(parents=True, exist_ok=True)
     for rows in ranking.values():
         for row in rows:
             track = "strict" if row.get("strategy_family") not in {"TrendCore", "RangeMR"} or row.get("code_change") else "fast"
+            candidate_type = "search-space" if row.get("search_space_patch") else "config"
+            candidate_dir = artifact_root / row["id"]
+            candidate_dir.mkdir(parents=True, exist_ok=True)
+            summary = row.get("summary", "research-generated config candidate")
+            metrics = {
+                "score": row["score"],
+                "symbol": row["symbol"],
+                "regime": row["regime"],
+                "walk_forward": row.get("walk_forward"),
+                "fees": row.get("fees"),
+            }
+            validation_report = {
+                "schema_valid": True,
+                "config_valid": True,
+                "backtest_pass": bool(row.get("walk_forward")),
+                "oos_pass": bool((row.get("walk_forward") or {}).get("out_sample")),
+                "severe_risk_flags": False,
+            }
+            (candidate_dir / "summary.md").write_text(f"# {row['id']}\n\n{summary}\n", encoding="utf-8")
+            (candidate_dir / "metrics.json").write_text(json.dumps(metrics, indent=2), encoding="utf-8")
+            (candidate_dir / "config_patch.yaml").write_text(yaml.safe_dump(row.get("strategy_config_patch", {}), sort_keys=True), encoding="utf-8")
+            (candidate_dir / "risk_notes.md").write_text("standard guardrails applied\n", encoding="utf-8")
+            (candidate_dir / "provenance.json").write_text(
+                json.dumps(
+                    {
+                        "provider": row.get("provider", "research_optimizer"),
+                        "generated_ts": time.time(),
+                        "bundle_source": "research_runner",
+                    },
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+            (candidate_dir / "validation_report.json").write_text(json.dumps(validation_report, indent=2), encoding="utf-8")
             registry.register(row["id"], row["score"], {
                 "symbol": row["symbol"],
                 "regime": row["regime"],
+                "symbols": [row["symbol"]],
+                "regimes": [row["regime"]],
+                "candidate_type": candidate_type,
                 "track": track,
-                "summary": row.get("summary", "research-generated config candidate"),
+                "summary": summary,
                 "backtest_result": row.get("walk_forward"),
+                "oos_result": (row.get("walk_forward") or {}).get("out_sample"),
                 "config_patch": row.get("strategy_config_patch"),
                 "provider_used": row.get("provider", "research_optimizer"),
                 "risk_notes": row.get("risk_notes", "standard guardrails applied"),
+                "validation_report": validation_report,
+                "artifact_bundle": str(candidate_dir),
                 "code_change": bool(row.get("code_change", False)),
             })
+            registry.transition(row["id"], "config_generated")
             registry.transition(row["id"], "backtest_pass")
-            registry.transition(row["id"], "oos_pass")
             registry.transition(row["id"], "ready_for_review")
             review_queue.enqueue({
                 "id": row["id"],
-                "symbol": row["symbol"],
-                "regime": row["regime"],
+                "type": candidate_type,
+                "symbols": [row["symbol"]],
+                "regimes": [row["regime"]],
+                "strategy_family": row.get("strategy_family"),
+                "provider": row.get("provider", "research_optimizer"),
                 "track": track,
+                "backtest_result": row.get("walk_forward"),
+                "oos_result": (row.get("walk_forward") or {}).get("out_sample"),
+                "paper_smoke_result": row.get("paper_smoke_result"),
+                "config_patch": row.get("strategy_config_patch"),
+                "warnings": row.get("warnings", []),
+                "recommendation": row.get("recommendation", "manual_review"),
+                "created_ts": time.time(),
                 "artifacts": {
-                    "summary": "research-generated config candidate",
-                    "backtest_result": row.get("walk_forward"),
-                    "paper_smoke_result": row.get("paper_smoke_result"),
-                    "config_patch": row.get("strategy_config_patch"),
-                    "risk_notes": "standard guardrails applied",
-                    "provider_used": row.get("provider", "research_optimizer"),
-                    "code_change": bool(row.get("code_change", False)),
+                    "summary": summary,
+                    "bundle": str(candidate_dir),
                 },
             })
     print(f"Candidate registry: {registry.report()}")

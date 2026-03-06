@@ -4,7 +4,7 @@ import json
 import pathlib
 import time
 
-ALLOWED_ACTIONS = {"approve", "reject", "hold", "micro_live"}
+ALLOWED_ACTIONS = {"approve_micro_live", "approve_live_full", "reject", "hold", "keep_paper"}
 
 
 class ReviewQueue:
@@ -28,7 +28,8 @@ class ReviewQueue:
         self._save(payload)
 
     def list_ready(self) -> list[dict]:
-        return self._load()["queue"]
+        rows = self._load()["queue"]
+        return sorted(rows, key=lambda r: r.get("created_ts", 0), reverse=True)
 
     def apply_action(self, candidate_id: str, action: str, note: str = "") -> dict:
         if action not in ALLOWED_ACTIONS:
@@ -48,6 +49,7 @@ class ReviewQueue:
             "action": action,
             "note": note,
             "track": found.get("track", "fast"),
+            "type": found.get("type", "config"),
             "ts": time.time(),
         }
         payload["queue"] = rest

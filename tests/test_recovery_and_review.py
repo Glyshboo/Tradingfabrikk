@@ -21,8 +21,8 @@ def test_review_queue_actions(tmp_path: Path):
     queue = ReviewQueue(str(tmp_path / "queue.json"))
     queue.enqueue({"id": "c1", "track": "fast"})
     assert len(queue.list_ready()) == 1
-    out = queue.apply_action("c1", "approve", "ok")
-    assert out["action"] == "approve"
+    out = queue.apply_action("c1", "approve_micro_live", "ok")
+    assert out["action"] == "approve_micro_live"
     assert len(queue.list_ready()) == 0
 
 

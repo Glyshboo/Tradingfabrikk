@@ -55,8 +55,8 @@ python -m apps.research_runner --config configs/active.yaml --space configs/rese
 
 Research/backtest henter nå Binance historical klines og cacher automatisk i `runtime/data_cache/`.
 Hvis historiske Binance-data ikke er tilgjengelig returneres tom serie (ingen syntetisk fallback), slik at research/backtest feiler lukket.
-Candidate-pipeline lagres i `runtime/candidates_registry.json` med states:
-`candidate -> backtest_pass -> paper_pass -> ready_for_review -> live_approved`.
+Candidate-pipeline lagres i `runtime/candidates_registry.json` med persisted state machine:
+`idea_proposed -> config_generated -> backtest_pass -> (paper_smoke_running/paper_smoke_pass) -> ready_for_review -> approved_for_micro_live -> micro_live_* -> approved_for_live_full`.
 
 Status:
 ```bash
@@ -100,6 +100,8 @@ python -m apps.self_check_runner --config configs/active.yaml
 - Engine pause/resume states are: `running`, `soft_paused`, `recovering`, `auto_resumed`, `hard_paused`.
 - On restart, engine registers a new session, computes downtime, backfills missing 1h/4h candles, restores risk/position state, then enters auto-resume.
 - Weekly risk guardrails are enabled with `risk.max_weekly_loss` and `risk.max_drawdown_pct`.
-- Unified review entrypoint: `python -m apps.review_runner --action list` (approve/reject/hold/micro_live via flags).
+- Unified review entrypoint: `python -m apps.review_runner --action list`.
+- Review actions: `approve_micro_live`, `approve_live_full` (only after micro-live states), `reject`, `hold`, `keep_paper`.
+- Review artifacts per candidate are stored in `runtime/review_artifacts/<candidate_id>/` (`summary.md`, `metrics.json`, `config_patch.yaml`, `risk_notes.md`, `provenance.json`, `validation_report.json`).
 - LLM research tooling: `python -m apps.llm_research_runner --prompt "..."` with provider-agnostic config (`llm.provider`, `llm.fallback_provider`).
 - LLM output never deploys live automatically; it only creates review-bound artifacts.

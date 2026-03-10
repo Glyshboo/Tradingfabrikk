@@ -227,3 +227,22 @@ def test_strict_candidate_requires_revalidation_before_review(tmp_path):
     engine.candidate_registry.update_meta("cand_strict", artifacts_patch={"paper_challenger_result": {"avg_pnl": 0.03, "evaluated": 2}})
     engine._auto_progress_paper_lifecycle()
     assert engine.candidate_registry.get("cand_strict")["state"] == "ready_for_review"
+
+
+def test_low_trust_candidate_is_gated_to_revalidation_after_smoke(tmp_path):
+    engine = MasterEngine(_cfg(tmp_path), PaperExecutionAdapter())
+    engine.candidate_registry.register(
+        "cand_low_trust",
+        1.0,
+        {
+            "symbols": ["BTCUSDT"],
+            "candidate_kind": "combination_candidate",
+            "onboarding_assessment": {"trust_score": 0.2, "onboarding_profile": "strict_track"},
+        },
+    )
+    engine.candidate_registry.transition("cand_low_trust", "paper_smoke_pass")
+    engine._auto_progress_paper_lifecycle()
+
+    row = engine.candidate_registry.get("cand_low_trust")
+    assert row["state"] == "needs_revalidation"
+    assert row["meta"]["lifecycle_reason"] == "incubation:low_initial_trust"

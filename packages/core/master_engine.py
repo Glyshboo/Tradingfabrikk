@@ -360,11 +360,18 @@ class MasterEngine:
                 if not cid:
                     continue
                 kind = row.get("candidate_kind") or row.get("meta", {}).get("candidate_kind", "config_tweak")
+                onboarding = row.get("artifacts", {}).get("onboarding_assessment") or row.get("meta", {}).get("onboarding_assessment") or {}
+                trust_score = float(onboarding.get("trust_score", row.get("trust_score", 0.5)) or 0.5)
                 is_strict = kind in strict_kinds or row.get("track") == "strict"
+                if trust_score < float(self.cfg.get("incubation", {}).get("min_trust_for_challenger", 0.28)) and src == "paper_smoke_pass":
+                    self.candidate_registry.update_meta(cid, meta_patch={"lifecycle_reason": "incubation:low_initial_trust", "review_revalidation_required": True})
+                    self.candidate_registry.transition(cid, "needs_revalidation")
+                    continue
                 if src == "challenger_active" and is_strict:
                     hold_until = float(row.get("meta", {}).get("challenger_hold_until_ts", 0.0) or 0.0)
+                    trust_hold_bonus = float(self.cfg.get("incubation", {}).get("trust_hold_sec", 60) or 60) if trust_score < 0.55 else 0.0
                     if hold_until <= 0:
-                        self.candidate_registry.update_meta(cid, meta_patch={"challenger_hold_until_ts": time.time() + strict_hold_sec, "lifecycle_reason": "incubation:strict_challenger_hold"})
+                        self.candidate_registry.update_meta(cid, meta_patch={"challenger_hold_until_ts": time.time() + strict_hold_sec + trust_hold_bonus, "lifecycle_reason": "incubation:strict_challenger_hold"})
                         continue
                     if time.time() < hold_until:
                         continue
@@ -485,6 +492,12 @@ class MasterEngine:
         fee_rate = float(challenger_cfg.get("fee_rate", 0.0006) or 0.0006)
         slippage_multiplier = float(challenger_cfg.get("slippage_multiplier", 1.0) or 1.0)
         funding_rate_8h = float(challenger_cfg.get("funding_rate_8h", 0.0001) or 0.0001)
+        candidate_row = self.candidate_registry.get(challenger.candidate_id or "") if challenger.candidate_id else None
+        exit_pack = (
+            (candidate_row or {}).get("artifacts", {}).get("strategy_composition", {}).get("exit_pack")
+            or (candidate_row or {}).get("meta", {}).get("strategy_composition", {}).get("exit_pack")
+            or "passthrough"
+        )
         self.challenger_eval_history.append(
             {
                 "symbol": decision.symbol,
@@ -495,6 +508,7 @@ class MasterEngine:
                 "signal_ts": signal_ts,
                 "runtime_model": challenger.runtime_model,
                 "overlay_candidate_id": challenger.candidate_id or "",
+                "exit_pack": exit_pack,
                 "hypothetical_qty": qty,
                 "entry_basis": entry_basis,
                 "fee_rate": fee_rate,
@@ -524,6 +538,51 @@ class MasterEngine:
         if not highs or not lows:
             return fallback_price, fallback_price, 0
         return max(highs), min(lows), len(highs)
+
+    def _shadow_truth_v2_classification(self, row: dict, pnl: float, cost_adjusted_pnl: float, mfe: float, mae: float, total_cost: float) -> dict:
+        move_quality = 0.0 if (mfe + mae) <= 1e-9 else max(0.0, min(1.0, (mfe - mae) / max(mfe + mae, 1e-9)))
+        entry_quality = 0.0 if (mfe + mae) <= 1e-9 else max(0.0, min(1.0, mfe / max(mfe + mae, 1e-9)))
+        capture_ratio = 0.0 if mfe <= 1e-9 else max(0.0, min(1.0, max(0.0, pnl) / mfe))
+        timing_quality = max(0.0, min(1.0, capture_ratio * 0.6 + move_quality * 0.4))
+        cost_quality = max(0.0, min(1.0, 1.0 - (total_cost / max(abs(pnl) + total_cost, 1e-9))))
+        path_quality = max(0.0, min(1.0, move_quality * 0.55 + entry_quality * 0.45))
+
+        exit_pack = str(row.get("exit_pack") or "passthrough")
+        expected_capture = {
+            "passthrough": 0.2,
+            "atr_trail": 0.35,
+            "fixed_rr": 0.5,
+        }.get(exit_pack, 0.3)
+        exit_quality = max(0.0, min(1.0, capture_ratio / max(expected_capture, 1e-9)))
+        if pnl < 0 and mfe > 0:
+            exit_quality = max(0.0, exit_quality - 0.3)
+
+        classification = "mixed_outcome"
+        if cost_adjusted_pnl < 0 and pnl > 0:
+            classification = "edge_died_in_costs"
+        elif mfe <= 1e-9 and abs(pnl) <= 1e-9:
+            classification = "signal_not_tradeable"
+        elif entry_quality < 0.4 and mae > mfe:
+            classification = "poor_entry"
+        elif entry_quality >= 0.55 and exit_quality < 0.35 and mfe > 0:
+            classification = "good_entry_bad_exit"
+        elif entry_quality >= 0.55 and timing_quality < 0.4:
+            classification = "good_idea_bad_timing"
+        elif pnl > 0 and path_quality < 0.4:
+            classification = "good_move_slow_follow_through"
+        elif cost_adjusted_pnl > 0 and path_quality > 0.55 and cost_quality > 0.45:
+            classification = "robust_shadow_win"
+
+        return {
+            "entry_quality": entry_quality,
+            "exit_quality": exit_quality,
+            "exit_pack_quality": exit_quality,
+            "timing_quality": timing_quality,
+            "cost_quality": cost_quality,
+            "path_quality": path_quality,
+            "move_quality": move_quality,
+            "outcome_classification": classification,
+        }
 
     def _evaluate_challenger_signals(self) -> int:
         if self.cfg.get("mode") != "paper":
@@ -560,9 +619,7 @@ class MasterEngine:
             funding_cost = notional * funding_rate_8h * max(window_sec, 0.0) / (8 * 3600)
             total_cost = fee_cost + slippage_cost + funding_cost
             cost_adjusted_pnl = pnl - total_cost
-            move_quality = 0.0 if (mfe + mae) <= 1e-9 else max(0.0, min(1.0, (mfe - mae) / max(mfe + mae, 1e-9)))
-            entry_quality = 0.0 if (mfe + mae) <= 1e-9 else max(0.0, min(1.0, mfe / max(mfe + mae, 1e-9)))
-            exit_pack_quality = 0.0 if mfe <= 1e-9 else max(0.0, min(1.0, max(0.0, pnl) / mfe))
+            quality = self._shadow_truth_v2_classification(row, pnl, cost_adjusted_pnl, mfe, mae, total_cost)
 
             row["status"] = "evaluated"
             row["result_pnl"] = pnl
@@ -570,9 +627,15 @@ class MasterEngine:
             row["result_ts"] = now
             row["mfe"] = mfe
             row["mae"] = mae
-            row["move_quality"] = move_quality
-            row["entry_quality"] = entry_quality
-            row["exit_pack_quality"] = exit_pack_quality
+            row.update(quality)
+            row["shadow_truth_v2"] = {
+                "entry_quality": round(float(quality["entry_quality"]), 6),
+                "exit_quality": round(float(quality["exit_quality"]), 6),
+                "timing_quality": round(float(quality["timing_quality"]), 6),
+                "cost_quality": round(float(quality["cost_quality"]), 6),
+                "path_quality": round(float(quality["path_quality"]), 6),
+                "outcome_classification": quality["outcome_classification"],
+            }
             row["cost_breakdown"] = {
                 "notional": round(notional, 8),
                 "fee_cost": round(fee_cost, 8),
@@ -685,6 +748,22 @@ class MasterEngine:
             avg_move_quality = (sum(float(x.get("move_quality") or 0.0) for x in evaluations) / len(evaluations)) if evaluations else 0.0
             avg_entry_quality = (sum(float(x.get("entry_quality") or 0.0) for x in evaluations) / len(evaluations)) if evaluations else 0.0
             avg_exit_pack_quality = (sum(float(x.get("exit_pack_quality") or 0.0) for x in evaluations) / len(evaluations)) if evaluations else 0.0
+            avg_exit_quality = (sum(float(x.get("exit_quality") or x.get("exit_pack_quality") or 0.0) for x in evaluations) / len(evaluations)) if evaluations else 0.0
+            avg_timing_quality = (sum(float(x.get("timing_quality") or x.get("move_quality") or 0.0) for x in evaluations) / len(evaluations)) if evaluations else 0.0
+            avg_cost_quality = (
+                sum(
+                    float(
+                        x.get("cost_quality")
+                        if x.get("cost_quality") is not None
+                        else (1.0 if float(x.get("result_cost_adjusted_pnl") or x.get("result_pnl") or 0.0) > 0 else 0.5)
+                    )
+                    for x in evaluations
+                )
+                / len(evaluations)
+            ) if evaluations else 0.0
+            avg_path_quality = (sum(float(x.get("path_quality") or x.get("move_quality") or 0.0) for x in evaluations) / len(evaluations)) if evaluations else 0.0
+            outcome_counts = Counter(str(x.get("outcome_classification") or "unknown") for x in evaluations)
+            dominant_outcome = outcome_counts.most_common(1)[0][0] if outcome_counts else "unknown"
             negative_ratio = (
                 sum(1 for x in evaluations if float(x.get("result_cost_adjusted_pnl") or x.get("result_pnl") or 0.0) < 0) / len(evaluations)
                 if evaluations
@@ -692,8 +771,12 @@ class MasterEngine:
             )
             candidate_row = self.candidate_registry.get(cid) or {}
             kind = candidate_row.get("candidate_kind") or candidate_row.get("meta", {}).get("candidate_kind", "config_tweak")
+            onboarding = candidate_row.get("artifacts", {}).get("onboarding_assessment") or candidate_row.get("meta", {}).get("onboarding_assessment") or {}
+            trust_score = float(onboarding.get("trust_score", candidate_row.get("trust_score", 0.5)) or 0.5)
             required_min_trades = min_trades
             required_winning_avg_pnl = winning_avg_pnl
+            if trust_score < 0.5:
+                required_min_trades += 1
             if kind in strict_kinds:
                 required_min_trades = max(min_trades, int(self.cfg.get("incubation", {}).get("strict_min_trades", min_trades + 1)))
                 required_winning_avg_pnl = max(winning_avg_pnl, float(self.cfg.get("incubation", {}).get("strict_winning_avg_pnl", winning_avg_pnl + 0.01)))
@@ -711,6 +794,12 @@ class MasterEngine:
                         "avg_move_quality": avg_move_quality,
                         "avg_entry_quality": avg_entry_quality,
                         "avg_exit_pack_quality": avg_exit_pack_quality,
+                        "avg_exit_quality": avg_exit_quality,
+                        "avg_timing_quality": avg_timing_quality,
+                        "avg_cost_quality": avg_cost_quality,
+                        "avg_path_quality": avg_path_quality,
+                        "outcome_classification_counts": dict(outcome_counts),
+                        "dominant_outcome_classification": dominant_outcome,
                         "window_sec": window_sec,
                         "ts": now,
                     }
@@ -718,6 +807,15 @@ class MasterEngine:
             )
             if len(evaluations) < required_min_trades:
                 self.candidate_registry.update_meta(cid, meta_patch={"lifecycle_reason": "paper:no_signal_density"})
+                self.candidate_registry.transition(cid, "paper_candidate_fail")
+                continue
+            if dominant_outcome in {"edge_died_in_costs", "signal_not_tradeable"} or avg_cost_quality < 0.3:
+                self.candidate_registry.update_meta(cid, meta_patch={"lifecycle_reason": "paper:cost_or_tradeability_decay"})
+                self.candidate_registry.transition(cid, "paper_candidate_fading")
+                self.candidate_registry.transition(cid, "edge_decay")
+                continue
+            if dominant_outcome == "poor_entry" and avg_entry_quality < 0.35:
+                self.candidate_registry.update_meta(cid, meta_patch={"lifecycle_reason": "paper:entry_quality_failure"})
                 self.candidate_registry.transition(cid, "paper_candidate_fail")
                 continue
             if avg_cost_adjusted_pnl <= edge_decay_avg_pnl or negative_ratio > max_negative_ratio:

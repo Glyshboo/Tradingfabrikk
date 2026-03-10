@@ -113,6 +113,18 @@ def test_challenger_evaluation_tracks_cost_adjusted_and_excursions(tmp_path):
     assert row["result_cost_adjusted_pnl"] < row["result_pnl"]
     assert row["move_quality"] > 0
     assert row["entry_quality"] > 0
+    assert row["exit_quality"] >= 0
+    assert row["path_quality"] >= 0
+    assert row["outcome_classification"] in {
+        "edge_died_in_costs",
+        "signal_not_tradeable",
+        "poor_entry",
+        "good_entry_bad_exit",
+        "good_idea_bad_timing",
+        "good_move_slow_follow_through",
+        "robust_shadow_win",
+        "mixed_outcome",
+    }
 
 
 def test_no_trade_diagnostics_aggregates_family_reasons(tmp_path):

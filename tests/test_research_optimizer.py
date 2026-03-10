@@ -218,3 +218,48 @@ def test_family_aware_mutation_prioritizes_family_keys() -> None:
     assert mutated is not None
     assert mutated["mutation_trace"]["family_priority_used"] is True
     assert mutated["mutation_trace"]["changed_keys"] == ["min_range_compression"]
+
+
+def test_onboarding_assessment_rewards_small_tweak_with_strong_evidence() -> None:
+    optimizer = ResearchOptimizer(seed=6)
+    evaluation = {
+        "plausible": True,
+        "rejection_reasons": [],
+        "components": {"oos_is_pnl_ratio": 0.7, "cost_drag_ratio": 0.1, "cost_to_gross_ratio": 0.2},
+    }
+    out_sample = BacktestResult(trades=14, pnl=4.0, sharpe_like=0.8, gross_pnl=4.9, total_cost=0.9, max_drawdown=0.8, turnover=120)
+    assessment = optimizer._onboarding_assessment(
+        candidate_kind="config_tweak",
+        strategy_family="TrendCore",
+        composition={"entry_family": "TrendCore", "filter_pack": "safe", "filter_modules": [], "exit_pack": "passthrough"},
+        evaluation=evaluation,
+        out_sample=out_sample,
+        search_space={"incubation": {"established_entry_families": ["TrendCore"]}},
+    )
+
+    assert assessment["trust_score"] >= 0.68
+    assert assessment["onboarding_profile"] == "fast_track"
+    assert assessment["novelty_summary"]["novelty_class"] == "minor_tweak"
+
+
+def test_onboarding_assessment_is_strict_for_new_complex_candidate() -> None:
+    optimizer = ResearchOptimizer(seed=7)
+    evaluation = {
+        "plausible": False,
+        "rejection_reasons": ["weak_oos_vs_is_robustness"],
+        "components": {"oos_is_pnl_ratio": 0.05, "cost_drag_ratio": 0.6, "cost_to_gross_ratio": 0.9},
+    }
+    out_sample = BacktestResult(trades=3, pnl=-0.2, sharpe_like=-0.1, gross_pnl=0.2, total_cost=0.4, max_drawdown=1.1, turnover=200)
+    assessment = optimizer._onboarding_assessment(
+        candidate_kind="new_family_candidate",
+        strategy_family="FailedBreakoutFade",
+        composition={"entry_family": "FailedBreakoutFade", "filter_pack": "trend_baseline", "filter_modules": ["session_gate", "atr_gate"], "exit_pack": "atr_trail"},
+        evaluation=evaluation,
+        out_sample=out_sample,
+        search_space={"incubation": {"established_entry_families": ["TrendCore"]}},
+        mutation_trace={"changed_keys": ["a", "b", "c"]},
+    )
+
+    assert assessment["trust_score"] < 0.45
+    assert assessment["onboarding_profile"] == "strict_track"
+    assert assessment["novelty_summary"]["novelty_class"] == "major_new_idea"

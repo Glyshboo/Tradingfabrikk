@@ -176,6 +176,11 @@ def run_research(
                 "trigger_context": trigger_context or {},
                 "strategy_family": row.get("strategy_family"),
                 "strategy_composition": row.get("strategy_composition", {}),
+                "onboarding_assessment": row.get("onboarding_assessment", {}),
+                "complexity_summary": (row.get("onboarding_assessment") or {}).get("complexity_summary", {}),
+                "novelty_summary": (row.get("onboarding_assessment") or {}).get("novelty_summary", {}),
+                "mutation_trace": row.get("mutation_trace", {}),
+                "mutation_source_id": row.get("mutation_source_id"),
             })
             registry.transition(row["id"], "config_generated")
             registry.transition(row["id"], "backtest_pass")

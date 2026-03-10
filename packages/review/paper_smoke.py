@@ -38,6 +38,8 @@ class PaperSmokeWorker:
             if len(candles) >= 8:
                 kind = row.get("candidate_kind") or row.get("meta", {}).get("candidate_kind", "config_tweak")
                 profile = self.cfg.get("paper_smoke_profiles", {}).get(kind, {})
+                onboarding = row.get("artifacts", {}).get("onboarding_assessment") or row.get("meta", {}).get("onboarding_assessment") or {}
+                trust_score = float(onboarding.get("trust_score", row.get("trust_score", 0.5)) or 0.5)
                 bt_result = self.bt.run(
                     candles,
                     strategy_family=strategy,
@@ -45,6 +47,11 @@ class PaperSmokeWorker:
                 )
                 min_trades = int(profile.get("min_trades", self.cfg.get("paper_smoke", {}).get("min_trades", 4)))
                 min_pnl = float(profile.get("min_pnl", self.cfg.get("paper_smoke", {}).get("min_pnl", -1.0)))
+                if trust_score < 0.45:
+                    min_trades += 1
+                    min_pnl = max(min_pnl, min_pnl + 0.05)
+                elif trust_score >= 0.72:
+                    min_trades = max(1, min_trades - 1)
                 passed = bt_result.trades >= min_trades and bt_result.pnl >= min_pnl
                 result = {
                     "status": "pass" if passed else "fail",
@@ -55,6 +62,7 @@ class PaperSmokeWorker:
                     "required_min_trades": min_trades,
                     "required_min_pnl": min_pnl,
                     "candidate_kind": kind,
+                    "trust_score": trust_score,
                 }
             self.registry.update_meta(
                 row["id"],

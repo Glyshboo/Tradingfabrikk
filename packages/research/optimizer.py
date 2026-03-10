@@ -308,6 +308,105 @@ class ResearchOptimizer:
             "family_overrides": family_overrides if isinstance(family_overrides, dict) else {},
         }
 
+    def _onboarding_assessment(
+        self,
+        *,
+        candidate_kind: str,
+        strategy_family: str,
+        composition: Dict,
+        evaluation: Dict,
+        out_sample: BacktestResult,
+        search_space: Dict,
+        mutation_trace: Dict | None = None,
+        parent: Dict | None = None,
+    ) -> Dict:
+        incubation = search_space.get("incubation", {}) if isinstance(search_space, dict) else {}
+        established = set(incubation.get("established_entry_families", ["TrendCore", "RangeMR"]))
+
+        filter_modules = list(composition.get("filter_modules") or [])
+        filter_pack = str(composition.get("filter_pack") or "safe")
+        exit_pack = str(composition.get("exit_pack") or "passthrough")
+        filter_complexity = len(filter_modules) + (0 if filter_pack in {"none", "safe"} else 1)
+        exit_complexity = 0 if exit_pack == "passthrough" else 1
+
+        changed_keys = list((mutation_trace or {}).get("changed_keys") or [])
+        mutation_distance = 0.0
+        if changed_keys:
+            mutation_distance = min(1.0, len(changed_keys) / 4.0)
+            if parent and composition != (parent.get("strategy_composition") or parent.get("composition") or {}):
+                mutation_distance = min(1.0, mutation_distance + 0.35)
+
+        components = evaluation.get("components", {}) if isinstance(evaluation, dict) else {}
+        plausibility_penalty = 0.0 if evaluation.get("plausible", False) else 0.45
+        oos_robustness = max(0.0, min(1.0, float(components.get("oos_is_pnl_ratio", 0.0)) / 0.8))
+        cost_drag = max(
+            float(components.get("cost_drag_ratio", 0.0)),
+            float(components.get("cost_to_gross_ratio", 0.0)),
+        )
+        evidence_strength = min(1.0, out_sample.trades / 12.0)
+        strong_parent = bool(parent and parent.get("plausible") and float(parent.get("score", 0.0)) > 0.0)
+
+        score = 0.55
+        score += 0.12 if candidate_kind == "config_tweak" else -0.08
+        score += 0.08 if strategy_family in established else -0.18
+        score -= min(0.2, filter_complexity * 0.05)
+        score -= exit_complexity * 0.05
+        score -= mutation_distance * 0.18
+        score += 0.07 if strong_parent else -0.05
+        score += (oos_robustness - 0.5) * 0.3
+        score -= min(0.22, cost_drag * 0.35)
+        score += (evidence_strength - 0.5) * 0.22
+        score -= plausibility_penalty
+        score = max(0.0, min(1.0, score))
+
+        trust_tier = "low"
+        if score >= 0.7:
+            trust_tier = "high"
+        elif score >= 0.5:
+            trust_tier = "medium"
+
+        novelty_class = "minor_tweak"
+        if candidate_kind in {"new_family_candidate", "combination_candidate"} or mutation_distance >= 0.6:
+            novelty_class = "major_new_idea"
+        elif mutation_distance >= 0.25 or filter_complexity > 1 or exit_complexity > 0:
+            novelty_class = "combination_tweak"
+
+        return {
+            "trust_score": round(score, 6),
+            "trust_tier": trust_tier,
+            "onboarding_profile": "fast_track" if score >= 0.68 and candidate_kind == "config_tweak" else "strict_track",
+            "complexity_summary": {
+                "filter_complexity": filter_complexity,
+                "exit_complexity": exit_complexity,
+                "mutation_distance": round(mutation_distance, 6),
+                "complexity_class": "high" if (filter_complexity + exit_complexity) >= 3 or mutation_distance > 0.6 else "standard",
+            },
+            "novelty_summary": {
+                "novelty_class": novelty_class,
+                "candidate_kind": candidate_kind,
+                "new_family": strategy_family not in established,
+                "strong_parent": strong_parent,
+            },
+            "progression_guidance": {
+                "recommended_min_challenger_evaluations": 2 if score >= 0.68 else 4,
+                "recommended_smoke_strictness": 0 if score >= 0.68 else 1,
+                "prefer_early_revalidation": score < 0.42,
+            },
+            "audit_components": {
+                "candidate_kind": candidate_kind,
+                "family_known": strategy_family in established,
+                "filter_complexity": filter_complexity,
+                "exit_complexity": exit_complexity,
+                "mutation_distance": round(mutation_distance, 6),
+                "strong_parent": strong_parent,
+                "oos_robustness": round(oos_robustness, 6),
+                "cost_drag": round(cost_drag, 6),
+                "evidence_strength": round(evidence_strength, 6),
+                "plausibility_penalty": plausibility_penalty,
+                "rejection_context": list(evaluation.get("rejection_reasons") or []),
+            },
+        }
+
     def random_search(
         self,
         search_space: Dict,
@@ -411,6 +510,7 @@ class ResearchOptimizer:
                             "fees": {"fee_bps": round(fee_bps, 6), "slippage_bps": round(slippage_bps, 6)},
                             "strategy_config": cfg,
                             "mutation_type": "seed",
+                            "mutation_trace": {"mutation_type": "seed", "changed_keys": []},
                             "strategy_config_patch": {strategy_family: {config_name: cfg}},
                             "strategy_profile_patch": {symbol: {regime: [[strategy_family, config_name]]}},
                             "idea_id": matching_idea.get("id") if matching_idea else None,
@@ -418,6 +518,15 @@ class ResearchOptimizer:
                             "idea_strict_track_required": bool(matching_idea.get("strict_track_required", False)) if matching_idea else False,
                             "idea_context_top": context_ideas,
                         }
+                        payload["onboarding_assessment"] = self._onboarding_assessment(
+                            candidate_kind=candidate_kind,
+                            strategy_family=strategy_family,
+                            composition=composition,
+                            evaluation=eval_result,
+                            out_sample=out_sample,
+                            search_space=search_space,
+                            mutation_trace=payload.get("mutation_trace"),
+                        )
                         bucket_rows.append(payload)
 
                 seeds = sorted([x for x in bucket_rows if x.get("plausible")], key=lambda x: x.get("score", -1e9), reverse=True)[:top_k]
@@ -475,6 +584,16 @@ class ResearchOptimizer:
                                 "out_sample_no_cost": self._as_payload(out_sample_no_cost),
                             },
                         }
+                        payload["onboarding_assessment"] = self._onboarding_assessment(
+                            candidate_kind=candidate_kind,
+                            strategy_family=family,
+                            composition=composition,
+                            evaluation=eval_result,
+                            out_sample=out_sample,
+                            search_space=search_space,
+                            mutation_trace=payload.get("mutation_trace"),
+                            parent=seed,
+                        )
                         bucket_rows.append(payload)
 
                 by_tuple[(symbol, regime)].extend(bucket_rows)

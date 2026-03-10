@@ -108,6 +108,10 @@ class MasterEngine:
             "reason_counts": {},
             "family_reason_counts": {},
             "family_quality": {},
+            "symbol_reason_counts": {},
+            "family_market_quality_blocks": {},
+            "quality_reason_counts": {},
+            "reason_outcome_stats": {},
             "recent": [],
         }
         ideas_dir = (cfg.get("bootstrap") or {}).get("strategy_idea_library_dir", "strategy_ideas")
@@ -431,6 +435,15 @@ class MasterEngine:
                 StrategyContext(snapshot=snap, regime=regime, config=cfg_row),
             )
             if isinstance(diag, dict):
+                quality = self._build_quality_diagnostics(
+                    family=str(diag.get("entry_family") or strat_name),
+                    regime=str(regime.value),
+                    symbol=symbol,
+                    snap=snap,
+                    profile=profile,
+                    setup_quality=float(diag.get("setup_quality", 0.0) or 0.0),
+                    reason=str(diag.get("reason") or "unknown"),
+                )
                 diagnostics.append(
                     {
                         "strategy": strat_name,
@@ -440,6 +453,7 @@ class MasterEngine:
                         "filter_pack": diag.get("filter_pack"),
                         "exit_pack": diag.get("exit_pack"),
                         "setup_quality": float(diag.get("setup_quality", 0.0) or 0.0),
+                        "quality": quality,
                     }
                 )
             if signal:
@@ -460,6 +474,82 @@ class MasterEngine:
         decision.overlay_candidate_id = overlay.candidate_id or ""
         return decision
 
+    def _build_quality_diagnostics(
+        self,
+        *,
+        family: str,
+        regime: str,
+        symbol: str,
+        snap,
+        profile,
+        setup_quality: float,
+        reason: str,
+    ) -> dict[str, float]:
+        spread_bps = float(snap.spread_bps if snap.spread_bps is not None else ((snap.ask - snap.bid) / max(snap.price, 1e-9)) * 10000)
+        spread_sanity = max(0.0, min(1.0, 1.0 - (spread_bps / 40.0)))
+        range_quality = max(0.0, min(1.0, 0.35 + float(snap.range_compression_score or 0.0)))
+        compression_quality = max(0.0, min(1.0, 1.0 - abs(float(snap.breakout_distance_from_recent_range or 0.0))))
+        volatility_cleanliness = max(0.0, min(1.0, 1.0 - min(1.0, float(snap.realized_volatility or 0.0) * 4.0)))
+        trend_clarity = max(0.0, min(1.0, 0.5 + min(0.5, abs(float(snap.trend_slope or 0.0) * 150))))
+        feature_conflicts = 0.35 if reason.startswith("blocked_by_filter") else 0.7
+        liquidity_sig = float(getattr(profile, "liquidity_signature", 0.7) or 0.7)
+        liquidity_sanity = max(0.0, min(1.0, liquidity_sig))
+        market_quality_score = (
+            spread_sanity * 0.2
+            + range_quality * 0.15
+            + compression_quality * 0.1
+            + volatility_cleanliness * 0.15
+            + trend_clarity * 0.15
+            + feature_conflicts * 0.1
+            + liquidity_sanity * 0.15
+        )
+
+        family_fit = 0.8 if (family.startswith("Trend") and regime.startswith("TREND")) or (family == "RangeMR" and regime == "RANGE") else 0.45
+        filter_agreement = 0.35 if reason.startswith("blocked_by_filter") else 0.75
+        entry_strength = max(0.0, min(1.0, setup_quality))
+        timing_quality = max(0.0, min(1.0, 0.5 + float(snap.trend_slope or 0.0) * 50))
+        recent_failure_context = 0.35 if reason != "ok" else 0.75
+        setup_quality_score = (
+            family_fit * 0.25 + filter_agreement * 0.2 + entry_strength * 0.25 + timing_quality * 0.15 + recent_failure_context * 0.15
+        )
+
+        symbol_profile_quality = max(0.0, min(1.0, liquidity_sanity))
+        recent_noise = max(0.0, min(1.0, 1.0 - min(1.0, float(snap.realized_volatility or 0.0) * 3.0)))
+        cost_quality = max(0.0, min(1.0, 1.0 - min(1.0, spread_bps / 50.0)))
+        no_trade_pressure = self.no_trade_diagnostics.get("symbol_reason_counts", {}).get(symbol, {})
+        no_trade_total = sum(int(v or 0) for v in no_trade_pressure.values())
+        no_trade_concentration = max(0.0, min(1.0, 1.0 - (no_trade_total / 25.0)))
+        candidate_success = 0.4 if reason != "ok" else 0.75
+        symbol_quality_score = (
+            symbol_profile_quality * 0.25
+            + recent_noise * 0.2
+            + candidate_success * 0.25
+            + no_trade_concentration * 0.15
+            + cost_quality * 0.15
+        )
+        return {
+            "spread_sanity": round(spread_sanity, 6),
+            "range_quality": round(range_quality, 6),
+            "compression_quality": round(compression_quality, 6),
+            "volatility_cleanliness": round(volatility_cleanliness, 6),
+            "trend_clarity": round(trend_clarity, 6),
+            "feature_conflicts": round(feature_conflicts, 6),
+            "liquidity_sanity": round(liquidity_sanity, 6),
+            "market_quality_score": round(market_quality_score, 6),
+            "family_fit": round(family_fit, 6),
+            "filter_agreement": round(filter_agreement, 6),
+            "entry_strength": round(entry_strength, 6),
+            "timing_quality": round(timing_quality, 6),
+            "recent_failure_context": round(recent_failure_context, 6),
+            "setup_quality_score": round(setup_quality_score, 6),
+            "symbol_profile_quality": round(symbol_profile_quality, 6),
+            "recent_noise": round(recent_noise, 6),
+            "candidate_success": round(candidate_success, 6),
+            "no_trade_concentration": round(no_trade_concentration, 6),
+            "cost_quality": round(cost_quality, 6),
+            "symbol_quality_score": round(symbol_quality_score, 6),
+        }
+
     def _record_no_trade_diagnostics(self, symbol: str, regime: str) -> None:
         rows = list(getattr(self, "_last_setup_diagnostics", []) or [])
         if not rows:
@@ -472,6 +562,12 @@ class MasterEngine:
 
         family_reason = self.no_trade_diagnostics.setdefault("family_reason_counts", {})
         family_quality = self.no_trade_diagnostics.setdefault("family_quality", {})
+        symbol_reason = self.no_trade_diagnostics.setdefault("symbol_reason_counts", {})
+        family_mq_blocks = self.no_trade_diagnostics.setdefault("family_market_quality_blocks", {})
+        quality_reason_counts = self.no_trade_diagnostics.setdefault("quality_reason_counts", {})
+        reason_outcome = self.no_trade_diagnostics.setdefault("reason_outcome_stats", {})
+        symbol_bucket = symbol_reason.setdefault(symbol, {})
+        symbol_bucket[primary_reason] = int(symbol_bucket.get(primary_reason, 0)) + 1
         for row in rows:
             family = str(row.get("entry_family") or row.get("strategy") or "unknown")
             reason = str(row.get("reason") or "unknown")
@@ -481,9 +577,45 @@ class MasterEngine:
             quality = family_quality.setdefault(family, {"observed": 0, "setup_quality_sum": 0.0})
             quality["observed"] = int(quality.get("observed", 0)) + 1
             quality["setup_quality_sum"] = float(quality.get("setup_quality_sum", 0.0)) + float(row.get("setup_quality", 0.0) or 0.0)
+            quality_components = row.get("quality") if isinstance(row.get("quality"), dict) else {}
+            market_quality = float(quality_components.get("market_quality_score", 0.0) or 0.0)
+            setup_quality = float(quality_components.get("setup_quality_score", row.get("setup_quality", 0.0)) or 0.0)
+            symbol_quality = float(quality_components.get("symbol_quality_score", 0.0) or 0.0)
+            if market_quality <= 0.45:
+                family_mq_blocks[family] = int(family_mq_blocks.get(family, 0)) + 1
+            for label, value in {
+                "market_quality": market_quality,
+                "setup_quality": setup_quality,
+                "symbol_quality": symbol_quality,
+            }.items():
+                if value <= 0.45:
+                    bucket = quality_reason_counts.setdefault(f"{label}:low", {})
+                    bucket[reason] = int(bucket.get(reason, 0)) + 1
+
+            outcome_bucket = reason_outcome.setdefault(reason, {"blocked": 0, "would_win": 0, "would_lose": 0})
+            outcome_bucket["blocked"] = int(outcome_bucket.get("blocked", 0)) + 1
+            pseudo_outcome = setup_quality - (1.0 - market_quality) * 0.35 - (1.0 - symbol_quality) * 0.25
+            if pseudo_outcome >= 0.55:
+                outcome_bucket["would_win"] = int(outcome_bucket.get("would_win", 0)) + 1
+            else:
+                outcome_bucket["would_lose"] = int(outcome_bucket.get("would_lose", 0)) + 1
 
         recent = self.no_trade_diagnostics.setdefault("recent", [])
-        recent.append({"ts": time.time(), "symbol": symbol, "regime": regime, "primary_reason": primary_reason, "families": sorted({r.get("entry_family") for r in rows if r.get("entry_family")})})
+        avg_market_quality = sum(float((r.get("quality") or {}).get("market_quality_score", 0.0) or 0.0) for r in rows) / max(1, len(rows))
+        avg_setup_quality = sum(float((r.get("quality") or {}).get("setup_quality_score", r.get("setup_quality", 0.0)) or 0.0) for r in rows) / max(1, len(rows))
+        avg_symbol_quality = sum(float((r.get("quality") or {}).get("symbol_quality_score", 0.0) or 0.0) for r in rows) / max(1, len(rows))
+        recent.append(
+            {
+                "ts": time.time(),
+                "symbol": symbol,
+                "regime": regime,
+                "primary_reason": primary_reason,
+                "families": sorted({r.get("entry_family") for r in rows if r.get("entry_family")}),
+                "avg_market_quality": round(avg_market_quality, 6),
+                "avg_setup_quality": round(avg_setup_quality, 6),
+                "avg_symbol_quality": round(avg_symbol_quality, 6),
+            }
+        )
         self.no_trade_diagnostics["recent"] = recent[-50:]
 
     def _record_challenger_signal(self, challenger, decision: DecisionRecord, signal_ts: float, entry_basis: float, cost_proxy: dict) -> None:

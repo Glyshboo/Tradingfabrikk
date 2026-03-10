@@ -6,7 +6,12 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
-from packages.research.insights import build_family_filter_exit_attribution, summarize_no_trade_intelligence
+from packages.research.insights import (
+    build_family_filter_exit_attribution,
+    build_family_profiles,
+    build_quality_summary,
+    summarize_no_trade_intelligence,
+)
 
 
 NOT_AVAILABLE = "not available"
@@ -170,6 +175,17 @@ class ResearchBundleExporter:
         ) or f"- {NOT_AVAILABLE}"
         no_trade = bundle.get("no_trade_intelligence") or {}
         nt_reasons = "\n".join(f"- {name}: {count}" for name, count in (no_trade.get("top_reasons") or [])[:5]) or f"- {NOT_AVAILABLE}"
+        quality = bundle.get("quality_summaries") or {}
+        market_q = (quality.get("market_quality") or {}).get("market_quality_score", NOT_AVAILABLE)
+        setup_q = (quality.get("setup_quality") or {}).get("setup_quality_score", NOT_AVAILABLE)
+        symbol_q = (quality.get("symbol_quality") or {}).get("symbol_quality_score", NOT_AVAILABLE)
+        family_profiles = (bundle.get("family_profiles") or {}).get("family_profiles") or {}
+        profile_lines = []
+        for family, row in list(family_profiles.items())[:4]:
+            preferred = ((row.get("preferred_regimes") or [{}])[0]).get("regime", "unknown")
+            harmful = ((row.get("harmful_regimes") or [{}])[0]).get("regime", "unknown")
+            profile_lines.append(f"- {family}: preferred={preferred}, harmful={harmful}, confidence={row.get('current_confidence', 0)}")
+        profile_text = "\n".join(profile_lines) or f"- {NOT_AVAILABLE}"
 
         return (
             "# Executive Summary\n\n"
@@ -186,6 +202,12 @@ class ResearchBundleExporter:
             f"- Performance memory cells: {learn.get('total_cells', 0)}\n"
             "\n## Family performance summary\n"
             f"{best_families}\n"
+            "\n## Family profiling snapshot\n"
+            f"{profile_text}\n"
+            "\n## Quality diagnostics\n"
+            f"- Market quality score: {market_q}\n"
+            f"- Setup quality score: {setup_q}\n"
+            f"- Symbol quality score: {symbol_q}\n"
             "\n## No-trade reason summary\n"
             f"{nt_reasons}\n"
             "\n## Hva systemet bør forske mer på neste runde\n"
@@ -196,8 +218,8 @@ class ResearchBundleExporter:
     def _format_top_candidates(self, top_candidates: list[dict]) -> str:
         header = (
             "# Top Candidates\n\n"
-            "| candidate_id | strategy_family | symbol | regime | current_state | research_score | plausible/rejection reasons | OOS pnl | OOS sharpe_like | challenger/paper result | learned adjustment | uncertainty penalty | recommendation |\n"
-            "|---|---|---|---|---|---:|---|---:|---:|---|---:|---:|---|\n"
+            "| candidate_id | strategy_family | symbol | regime | current_state | research_score | family-fit context | plausible/rejection reasons | OOS pnl | OOS sharpe_like | challenger/paper result | learned adjustment | uncertainty penalty | recommendation |\n"
+            "|---|---|---|---|---|---:|---|---|---:|---:|---|---:|---:|---|\n"
         )
         rows = []
         for row in top_candidates:
@@ -207,14 +229,17 @@ class ResearchBundleExporter:
             if row.get("rejection_reasons"):
                 plausible_text += " / " + ", ".join(str(x) for x in row.get("rejection_reasons")[:3])
             challenger_text = challenger if challenger else NOT_AVAILABLE
+            composition = row.get("strategy_composition") or {}
+            family_fit = f"filter={composition.get('filter_pack', 'safe')}, exit={composition.get('exit_pack', 'passthrough')}"
             rows.append(
-                "| {candidate_id} | {strategy_family} | {symbol} | {regime} | {current_state} | {score} | {plausible} | {oos_pnl} | {oos_sharpe} | {challenger} | {learned} | {uncertainty} | {recommendation} |".format(
+                "| {candidate_id} | {strategy_family} | {symbol} | {regime} | {current_state} | {score} | {family_fit} | {plausible} | {oos_pnl} | {oos_sharpe} | {challenger} | {learned} | {uncertainty} | {recommendation} |".format(
                     candidate_id=row.get("candidate_id", NOT_AVAILABLE),
                     strategy_family=row.get("strategy_family", NOT_AVAILABLE),
                     symbol=row.get("symbol", NOT_AVAILABLE),
                     regime=row.get("regime", NOT_AVAILABLE),
                     current_state=row.get("current_state", NOT_AVAILABLE),
                     score=row.get("research_score", NOT_AVAILABLE),
+                    family_fit=family_fit,
                     plausible=plausible_text,
                     oos_pnl=oos.get("pnl", NOT_AVAILABLE),
                     oos_sharpe=oos.get("sharpe_like", NOT_AVAILABLE),
@@ -225,10 +250,10 @@ class ResearchBundleExporter:
                 )
             )
         if not rows:
-            rows = [f"| {NOT_AVAILABLE} | {NOT_AVAILABLE} | {NOT_AVAILABLE} | {NOT_AVAILABLE} | {NOT_AVAILABLE} | {NOT_AVAILABLE} | {NOT_AVAILABLE} | {NOT_AVAILABLE} | {NOT_AVAILABLE} | {NOT_AVAILABLE} | {NOT_AVAILABLE} | {NOT_AVAILABLE} | {NOT_AVAILABLE} |"]
+            rows = [f"| {NOT_AVAILABLE} | {NOT_AVAILABLE} | {NOT_AVAILABLE} | {NOT_AVAILABLE} | {NOT_AVAILABLE} | {NOT_AVAILABLE} | {NOT_AVAILABLE} | {NOT_AVAILABLE} | {NOT_AVAILABLE} | {NOT_AVAILABLE} | {NOT_AVAILABLE} | {NOT_AVAILABLE} | {NOT_AVAILABLE} | {NOT_AVAILABLE} |"]
         return header + "\n".join(rows) + "\n"
 
-    def _format_failure_report(self, failure_patterns: dict, attribution: dict, no_trade: dict) -> str:
+    def _format_failure_report(self, failure_patterns: dict, attribution: dict, no_trade: dict, quality: dict) -> str:
         def _render_pairs(title: str, pairs: list[tuple]) -> str:
             body = "\n".join(f"- {name}: {count}" for name, count in pairs) if pairs else f"- {NOT_AVAILABLE}"
             return f"## {title}\n{body}\n"
@@ -243,6 +268,9 @@ class ResearchBundleExporter:
         weak_filters = [r for r in (attribution.get("filter_module_summary") or []) if r.get("impact") == "harms"][:6]
         weak_exits = [r for r in (attribution.get("exit_pack_summary") or []) if r.get("impact") == "harms"][:6]
         family_patterns = no_trade.get("family_patterns") or []
+        symbol_patterns = no_trade.get("symbol_patterns") or []
+        gate_usefulness = no_trade.get("gate_usefulness") or []
+        market_quality = quality.get("market_quality") or {}
 
         return (
             "# Failure Report\n\n"
@@ -252,6 +280,10 @@ class ResearchBundleExporter:
             + _render_pairs("Filter modules som ofte ser ut til å skade edge", [(f"{r.get('family')}::{r.get('name')}", r.get("samples", 0)) for r in weak_filters])
             + _render_pairs("Exit packs som ofte ser ut til å skade edge", [(f"{r.get('family')}::{r.get('name')}", r.get("samples", 0)) for r in weak_exits])
             + _render_pairs("No-trade patterns per family", [(f"{r.get('family')}::{r.get('top_reason')}", r.get("top_reason_count", 0)) for r in family_patterns[:8]])
+            + _render_pairs("No-trade patterns per symbol", [(f"{r.get('symbol')}::{r.get('top_reason')}", r.get("top_reason_count", 0)) for r in symbol_patterns[:8]])
+            + _render_pairs("No-trade gates som virker protective", [(r.get("reason"), f"protect={r.get('protect_rate')}") for r in gate_usefulness[:6]])
+            + "## Market quality baseline\n"
+            + "\n".join(f"- {name}: {val}" for name, val in market_quality.items())
             + "## Siste tydelige feilmønstre\n"
             + recent_text
             + "\n\n## Praktisk tolkning\n"
@@ -262,11 +294,24 @@ class ResearchBundleExporter:
         response_format = self._format_llm_response_template()
         attr = bundle.get("family_filter_exit_attribution") or {}
         no_trade = bundle.get("no_trade_intelligence") or {}
+        family_profiles = (bundle.get("family_profiles") or {}).get("family_profiles") or {}
+        quality = bundle.get("quality_summaries") or {}
         family_lines = "\n".join(
             f"- {row.get('family')}: avg_edge={row.get('avg_edge')} samples={row.get('samples')}"
             for row in (attr.get("family_summary") or [])[:6]
         ) or f"- {NOT_AVAILABLE}"
         no_trade_lines = "\n".join(f"- {name}: {count}" for name, count in (no_trade.get("top_reasons") or [])[:6]) or f"- {NOT_AVAILABLE}"
+        profile_lines = "\n".join(
+            f"- {family}: preferred={((row.get('preferred_regimes') or [{}])[0]).get('regime', 'unknown')} harmful={((row.get('harmful_regimes') or [{}])[0]).get('regime', 'unknown')} confidence={row.get('current_confidence', 0)}"
+            for family, row in list(family_profiles.items())[:6]
+        ) or f"- {NOT_AVAILABLE}"
+        quality_lines = "\n".join(
+            f"- {name}: {value}" for name, value in {
+                "market_quality_score": (quality.get("market_quality") or {}).get("market_quality_score", NOT_AVAILABLE),
+                "setup_quality_score": (quality.get("setup_quality") or {}).get("setup_quality_score", NOT_AVAILABLE),
+                "symbol_quality_score": (quality.get("symbol_quality") or {}).get("symbol_quality_score", NOT_AVAILABLE),
+            }.items()
+        )
         return (
             "# Paste to LLM\n\n"
             "## Systeminstruksjon til LLM\n"
@@ -281,6 +326,10 @@ class ResearchBundleExporter:
             f"{failure_report_md}\n\n"
             "## Family/filter/exit attribution snapshot\n"
             f"{family_lines}\n\n"
+            "## Family profile snapshot\n"
+            f"{profile_lines}\n\n"
+            "## Quality diagnostics snapshot\n"
+            f"{quality_lines}\n\n"
             "## No-trade intelligence snapshot\n"
             f"{no_trade_lines}\n\n"
             "## Oppgave til LLM\n"
@@ -354,6 +403,8 @@ class ResearchBundleExporter:
         failure_patterns = self._failure_patterns(candidates, status, engine_state)
         attribution = build_family_filter_exit_attribution(candidates, ranking if isinstance(ranking, dict) else {})
         no_trade = summarize_no_trade_intelligence(status.get("no_trade_diagnostics") or engine_state.get("no_trade_diagnostics") or {})
+        quality = build_quality_summary(candidates, no_trade)
+        family_profiles = build_family_profiles(candidates, attribution, no_trade, self._performance_memory_snapshot(engine_state))
 
         promising_filters = [x for x in (attribution.get("filter_module_summary") or []) if x.get("impact") == "improves"][:8]
         dead_end_filters = [x for x in (attribution.get("filter_module_summary") or []) if x.get("impact") == "harms"][:8]
@@ -376,6 +427,8 @@ class ResearchBundleExporter:
             "selector_summary": self._selector_summary(status),
             "top_failure_patterns": failure_patterns,
             "family_filter_exit_attribution": attribution,
+            "family_profiles": family_profiles,
+            "quality_summaries": quality,
             "no_trade_intelligence": no_trade,
             "research_recommendations": {
                 "promising_filters": promising_filters,
@@ -395,7 +448,7 @@ class ResearchBundleExporter:
 
         executive_summary = self._format_executive_summary(bundle)
         top_candidates_md = self._format_top_candidates(top_candidates)
-        failure_report_md = self._format_failure_report(failure_patterns, attribution, no_trade)
+        failure_report_md = self._format_failure_report(failure_patterns, attribution, no_trade, quality)
         paste_to_llm_md = self._format_paste_to_llm(executive_summary, top_candidates_md, failure_report_md, bundle)
 
         return bundle, {

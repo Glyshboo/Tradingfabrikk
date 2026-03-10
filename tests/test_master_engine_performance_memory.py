@@ -130,9 +130,24 @@ def test_challenger_evaluation_tracks_cost_adjusted_and_excursions(tmp_path):
 def test_no_trade_diagnostics_aggregates_family_reasons(tmp_path):
     engine = MasterEngine(_cfg(tmp_path), PaperExecutionAdapter())
     engine._last_setup_diagnostics = [
-        {"entry_family": "TrendCore", "reason": "blocked_by_filter:trend_slope_gate", "setup_quality": 0.0},
-        {"entry_family": "TrendCore", "reason": "blocked_by_filter:trend_slope_gate", "setup_quality": 0.0},
-        {"entry_family": "RangeMR", "reason": "entry_no_signal", "setup_quality": 0.0},
+        {
+            "entry_family": "TrendCore",
+            "reason": "blocked_by_filter:trend_slope_gate",
+            "setup_quality": 0.0,
+            "quality": {"market_quality_score": 0.3, "setup_quality_score": 0.2, "symbol_quality_score": 0.4},
+        },
+        {
+            "entry_family": "TrendCore",
+            "reason": "blocked_by_filter:trend_slope_gate",
+            "setup_quality": 0.0,
+            "quality": {"market_quality_score": 0.35, "setup_quality_score": 0.25, "symbol_quality_score": 0.45},
+        },
+        {
+            "entry_family": "RangeMR",
+            "reason": "entry_no_signal",
+            "setup_quality": 0.0,
+            "quality": {"market_quality_score": 0.7, "setup_quality_score": 0.6, "symbol_quality_score": 0.65},
+        },
     ]
 
     engine._record_no_trade_diagnostics("BTCUSDT", "TREND_UP")
@@ -140,3 +155,6 @@ def test_no_trade_diagnostics_aggregates_family_reasons(tmp_path):
     assert engine.no_trade_diagnostics["total_no_trade_events"] == 1
     assert engine.no_trade_diagnostics["reason_counts"]["blocked_by_filter:trend_slope_gate"] == 1
     assert engine.no_trade_diagnostics["family_reason_counts"]["TrendCore"]["blocked_by_filter:trend_slope_gate"] == 2
+    assert engine.no_trade_diagnostics["symbol_reason_counts"]["BTCUSDT"]["blocked_by_filter:trend_slope_gate"] == 1
+    assert engine.no_trade_diagnostics["family_market_quality_blocks"]["TrendCore"] == 2
+    assert "market_quality:low" in engine.no_trade_diagnostics["quality_reason_counts"]

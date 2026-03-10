@@ -7,6 +7,7 @@ import os
 import pathlib
 import time
 from collections import defaultdict, deque
+from datetime import datetime, timezone
 from typing import Any, Dict, Iterable
 from urllib import parse, request
 
@@ -46,7 +47,11 @@ class DataManager:
         }
         self._active_candles: dict[str, dict[str, dict[str, float | bool]]] = defaultdict(dict)
         self._indicators: dict[str, dict[str, dict[str, float | None]]] = {
-            sym: {"1h": {"atr": None, "rsi": None}, "4h": {"atr": None, "rsi": None}} for sym in self.symbols
+            sym: {
+                "1h": {"atr": None, "rsi": None, "trend_slope": None, "realized_volatility": None, "range_compression_score": None, "range_high": None, "range_low": None, "breakout_distance_from_recent_range": None},
+                "4h": {"atr": None, "rsi": None, "trend_slope": None, "realized_volatility": None, "range_compression_score": None, "range_high": None, "range_low": None, "breakout_distance_from_recent_range": None},
+            }
+            for sym in self.symbols
         }
         self.account_state: dict[str, Any] = {"equity": None, "positions": {}, "last_event_ts": None}
 
@@ -121,14 +126,29 @@ class DataManager:
         ask = float(data.get("a", data.get("c", 0.0)))
         price = (bid + ask) / 2 if bid and ask else float(data.get("c", 0.0))
         prev = self.market.get(symbol)
+        next_bid = bid if bid else price
+        next_ask = ask if ask else price
+        spread_bps = ((next_ask - next_bid) / max(price, 1e-9)) * 10000
         self.market[symbol] = MarketSnapshot(
             symbol=symbol,
             price=price,
-            bid=bid if bid else price,
-            ask=ask if ask else price,
+            bid=next_bid,
+            ask=next_ask,
             candle_close=prev.candle_close if prev else price,
             atr=prev.atr if prev else None,
             rsi=prev.rsi if prev else None,
+            trend_slope=prev.trend_slope if prev else None,
+            realized_volatility=prev.realized_volatility if prev else None,
+            spread_bps=round(spread_bps, 6),
+            atr_pct_of_price=prev.atr_pct_of_price if prev else None,
+            session_bucket=prev.session_bucket if prev else None,
+            hour_bucket=prev.hour_bucket if prev else None,
+            range_compression_score=prev.range_compression_score if prev else None,
+            breakout_distance_from_recent_range=prev.breakout_distance_from_recent_range if prev else None,
+            rsi_1h=prev.rsi_1h if prev else None,
+            rsi_4h=prev.rsi_4h if prev else None,
+            atr_1h=prev.atr_1h if prev else None,
+            atr_4h=prev.atr_4h if prev else None,
             ts=now,
         )
 
@@ -148,17 +168,25 @@ class DataManager:
         self._active_candles[symbol][interval] = candle
         if candle["closed"]:
             self._append_closed_candle(symbol, interval, candle)
-            self._indicators[symbol][interval] = {
-                "atr": self._compute_atr(symbol, interval, 14),
-                "rsi": self._compute_rsi(symbol, interval, 14),
-            }
+            self._recompute_interval_features(symbol, interval)
 
-        ref_interval = "1h" if self._indicators[symbol]["1h"]["atr"] is not None else interval
-        atr = self._indicators[symbol][ref_interval]["atr"]
-        rsi = self._indicators[symbol][ref_interval]["rsi"]
+        indicators_1h = self._indicators[symbol]["1h"]
+        indicators_4h = self._indicators[symbol]["4h"]
+        atr_1h = indicators_1h.get("atr")
+        atr_4h = indicators_4h.get("atr")
+        rsi_1h = indicators_1h.get("rsi")
+        rsi_4h = indicators_4h.get("rsi")
+        atr = atr_1h if atr_1h is not None else atr_4h
+        rsi = rsi_1h if rsi_1h is not None else rsi_4h
+        trend_slope = indicators_1h.get("trend_slope") if indicators_1h.get("trend_slope") is not None else indicators_4h.get("trend_slope")
+        realized_volatility = indicators_1h.get("realized_volatility") if indicators_1h.get("realized_volatility") is not None else indicators_4h.get("realized_volatility")
+        range_compression_score = indicators_1h.get("range_compression_score") if indicators_1h.get("range_compression_score") is not None else indicators_4h.get("range_compression_score")
+        breakout_distance = indicators_1h.get("breakout_distance_from_recent_range") if indicators_1h.get("breakout_distance_from_recent_range") is not None else indicators_4h.get("breakout_distance_from_recent_range")
         prev = self.market.get(symbol)
         base_bid = prev.bid if prev else candle["close"]
         base_ask = prev.ask if prev else candle["close"]
+        spread_bps = ((base_ask - base_bid) / max(candle["close"], 1e-9)) * 10000
+        hour_bucket = self._extract_hour_bucket(candle)
         self.market[symbol] = MarketSnapshot(
             symbol=symbol,
             price=candle["close"],
@@ -167,6 +195,18 @@ class DataManager:
             candle_close=candle["close"],
             atr=atr,
             rsi=rsi,
+            trend_slope=trend_slope,
+            realized_volatility=realized_volatility,
+            spread_bps=round(spread_bps, 6),
+            atr_pct_of_price=(None if atr is None else round(atr / max(candle["close"], 1e-9), 8)),
+            session_bucket=self._session_bucket_for_hour(hour_bucket),
+            hour_bucket=hour_bucket,
+            range_compression_score=range_compression_score,
+            breakout_distance_from_recent_range=breakout_distance,
+            rsi_1h=rsi_1h,
+            rsi_4h=rsi_4h,
+            atr_1h=atr_1h,
+            atr_4h=atr_4h,
             ts=time.time(),
         )
 
@@ -210,6 +250,80 @@ class DataManager:
             return 100.0
         rs = avg_gain / avg_loss
         return round(100 - (100 / (1 + rs)), 6)
+
+    def _compute_trend_slope(self, symbol: str, interval: str, lookback: int = 20) -> float | None:
+        candles = list(self.candles[symbol][interval])
+        if len(candles) < lookback:
+            return None
+        closes = [float(c["close"]) for c in candles[-lookback:]]
+        first = closes[0]
+        if first <= 1e-9:
+            return None
+        slope = (closes[-1] - first) / first
+        return round(slope, 8)
+
+    def _compute_realized_volatility(self, symbol: str, interval: str, lookback: int = 20) -> float | None:
+        candles = list(self.candles[symbol][interval])
+        if len(candles) < lookback + 1:
+            return None
+        closes = [float(c["close"]) for c in candles[-(lookback + 1):]]
+        log_returns: list[float] = []
+        for prev, curr in zip(closes[:-1], closes[1:]):
+            if prev <= 1e-9 or curr <= 1e-9:
+                continue
+            log_returns.append(math.log(curr / prev))
+        if len(log_returns) < 2:
+            return None
+        mean = sum(log_returns) / len(log_returns)
+        variance = sum((x - mean) ** 2 for x in log_returns) / (len(log_returns) - 1)
+        return round(math.sqrt(max(variance, 0.0)), 8)
+
+    def _compute_recent_range_metrics(self, symbol: str, interval: str, lookback: int = 20) -> tuple[float | None, float | None, float | None, float | None]:
+        candles = list(self.candles[symbol][interval])
+        if len(candles) < lookback:
+            return None, None, None, None
+        window = candles[-lookback:]
+        highs = [float(c["high"]) for c in window]
+        lows = [float(c["low"]) for c in window]
+        closes = [float(c["close"]) for c in window]
+        range_high = max(highs)
+        range_low = min(lows)
+        width = max(range_high - range_low, 0.0)
+        avg_close = sum(closes) / len(closes)
+        compression = None if avg_close <= 1e-9 else round(width / avg_close, 8)
+        last_close = closes[-1]
+        distance = 0.0
+        if last_close > range_high:
+            distance = (last_close - range_high) / max(last_close, 1e-9)
+        elif last_close < range_low:
+            distance = (last_close - range_low) / max(last_close, 1e-9)
+        return round(range_high, 8), round(range_low, 8), compression, round(distance, 8)
+
+    def _extract_hour_bucket(self, candle: dict[str, float | bool]) -> int:
+        close_time_ms = float(candle.get("close_time", 0.0) or 0.0)
+        if close_time_ms <= 0:
+            return int(datetime.now(timezone.utc).hour)
+        return int(datetime.fromtimestamp(close_time_ms / 1000, tz=timezone.utc).hour)
+
+    def _session_bucket_for_hour(self, hour_bucket: int) -> str:
+        if 0 <= hour_bucket < 8:
+            return "asia"
+        if 8 <= hour_bucket < 16:
+            return "europe"
+        return "us"
+
+    def _recompute_interval_features(self, symbol: str, interval: str) -> None:
+        range_high, range_low, compression, breakout_distance = self._compute_recent_range_metrics(symbol, interval, lookback=20)
+        self._indicators[symbol][interval] = {
+            "atr": self._compute_atr(symbol, interval, 14),
+            "rsi": self._compute_rsi(symbol, interval, 14),
+            "trend_slope": self._compute_trend_slope(symbol, interval, lookback=20),
+            "realized_volatility": self._compute_realized_volatility(symbol, interval, lookback=20),
+            "range_compression_score": compression,
+            "range_high": range_high,
+            "range_low": range_low,
+            "breakout_distance_from_recent_range": breakout_distance,
+        }
 
     def _market_stream_url(self) -> str:
         streams = [f"{s.lower()}@bookTicker" for s in self.symbols]
@@ -385,6 +499,9 @@ class DataManager:
                         self.candles[sym][interval].clear()
                         self.candles[sym][interval].extend(series)
         self.last_update_ts = payload.get("last_update_ts")
+        for sym in self.symbols:
+            for interval in ("1h", "4h"):
+                self._recompute_interval_features(sym, interval)
 
     def backfill_gap(self, downtime_sec: float) -> None:
         if downtime_sec <= 0:
@@ -405,10 +522,7 @@ class DataManager:
                         "closed": True,
                     }
                     self._append_closed_candle(symbol, interval, candle)
-                self._indicators[symbol][interval] = {
-                    "atr": self._compute_atr(symbol, interval, 14),
-                    "rsi": self._compute_rsi(symbol, interval, 14),
-                }
+                self._recompute_interval_features(symbol, interval)
     def load_historical_candles(
         self,
         symbol: str,

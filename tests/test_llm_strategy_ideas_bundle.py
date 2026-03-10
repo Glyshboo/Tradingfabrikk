@@ -14,6 +14,7 @@ def test_compact_research_bundle_includes_strategy_idea_context(tmp_path):
                 "symbols": ["BTCUSDT"],
                 "current_regime": {"BTCUSDT": "TREND_UP"},
                 "last_decision": {"blocked_reason": None, "score_components": {}},
+                "market_features": {"BTCUSDT": {"trend_slope": 0.012, "spread_bps": 2.1}},
             }
         ),
         encoding="utf-8",
@@ -26,3 +27,4 @@ def test_compact_research_bundle_includes_strategy_idea_context(tmp_path):
     assert strategy_library["summary"]["implemented_plugin_count"] >= 2
     assert "BTCUSDT:TREND_UP" in strategy_library["top_ranked_by_symbol_regime"]
     assert strategy_library["validation"]["valid"] is True
+    assert bundle["market_features"]["BTCUSDT"]["trend_slope"] == 0.012

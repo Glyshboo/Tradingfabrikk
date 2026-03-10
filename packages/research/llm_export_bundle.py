@@ -6,6 +6,8 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
+from packages.research.insights import build_family_filter_exit_attribution, summarize_no_trade_intelligence
+
 
 NOT_AVAILABLE = "not available"
 
@@ -67,6 +69,7 @@ class ResearchBundleExporter:
                     "learned_adjustment": meta.get("learned_adjustment", NOT_AVAILABLE),
                     "uncertainty_penalty": meta.get("uncertainty_penalty", NOT_AVAILABLE),
                     "recommendation": artifacts.get("recommendation") or meta.get("recommendation") or NOT_AVAILABLE,
+                    "strategy_composition": row.get("strategy_composition") or meta.get("strategy_composition") or {},
                     "updated_ts": row.get("updated_ts", 0),
                 }
             )
@@ -160,6 +163,13 @@ class ResearchBundleExporter:
         learn = bundle.get("performance_memory_snapshot") or {}
         selector = bundle.get("selector_summary") or {}
         reasons = failures.get("top_rejection_reasons") or []
+        family_attr = (bundle.get("family_filter_exit_attribution") or {}).get("family_summary") or []
+        best_families = "\n".join(
+            f"- {row.get('family')}: avg_edge={row.get('avg_edge')} (samples={row.get('samples')})"
+            for row in family_attr[:4]
+        ) or f"- {NOT_AVAILABLE}"
+        no_trade = bundle.get("no_trade_intelligence") or {}
+        nt_reasons = "\n".join(f"- {name}: {count}" for name, count in (no_trade.get("top_reasons") or [])[:5]) or f"- {NOT_AVAILABLE}"
 
         return (
             "# Executive Summary\n\n"
@@ -174,6 +184,10 @@ class ResearchBundleExporter:
             + "\n\n## Hva selector/performance memory ser ut til å lære\n"
             f"- Last blocked reason: {selector.get('blocked_reason', NOT_AVAILABLE)}\n"
             f"- Performance memory cells: {learn.get('total_cells', 0)}\n"
+            "\n## Family performance summary\n"
+            f"{best_families}\n"
+            "\n## No-trade reason summary\n"
+            f"{nt_reasons}\n"
             "\n## Hva systemet bør forske mer på neste runde\n"
             "- Prioriter symbol/regime-kombinasjoner med høy failure-rate, men der rejection skyldes få trades eller kostnads-sensitivitet.\n"
             "- Foreslå små, testbare endringer i filters, regime-regler og search-space fremfor brede redesign.\n"
@@ -214,7 +228,7 @@ class ResearchBundleExporter:
             rows = [f"| {NOT_AVAILABLE} | {NOT_AVAILABLE} | {NOT_AVAILABLE} | {NOT_AVAILABLE} | {NOT_AVAILABLE} | {NOT_AVAILABLE} | {NOT_AVAILABLE} | {NOT_AVAILABLE} | {NOT_AVAILABLE} | {NOT_AVAILABLE} | {NOT_AVAILABLE} | {NOT_AVAILABLE} | {NOT_AVAILABLE} |"]
         return header + "\n".join(rows) + "\n"
 
-    def _format_failure_report(self, failure_patterns: dict) -> str:
+    def _format_failure_report(self, failure_patterns: dict, attribution: dict, no_trade: dict) -> str:
         def _render_pairs(title: str, pairs: list[tuple]) -> str:
             body = "\n".join(f"- {name}: {count}" for name, count in pairs) if pairs else f"- {NOT_AVAILABLE}"
             return f"## {title}\n{body}\n"
@@ -226,20 +240,33 @@ class ResearchBundleExporter:
         ) or f"- {NOT_AVAILABLE}"
 
         interpretation = "Funnene tyder på at robusthet svekkes når kandidater har lav sample-støtte, negativ OOS etter kostnader, eller fallende challenger-resultater. Prioriter strengere filtre og revalidering før videre promotering."
+        weak_filters = [r for r in (attribution.get("filter_module_summary") or []) if r.get("impact") == "harms"][:6]
+        weak_exits = [r for r in (attribution.get("exit_pack_summary") or []) if r.get("impact") == "harms"][:6]
+        family_patterns = no_trade.get("family_patterns") or []
 
         return (
             "# Failure Report\n\n"
             + _render_pairs("Vanligste rejection reasons", failure_patterns.get("top_rejection_reasons") or [])
             + _render_pairs("Strategier/symboler/regimer som går igjen i failures", failure_patterns.get("failure_strategies") or [])
             + _render_pairs("State-mønstre (inkl. edge_decay / needs_revalidation)", failure_patterns.get("failure_states") or [])
+            + _render_pairs("Filter modules som ofte ser ut til å skade edge", [(f"{r.get('family')}::{r.get('name')}", r.get("samples", 0)) for r in weak_filters])
+            + _render_pairs("Exit packs som ofte ser ut til å skade edge", [(f"{r.get('family')}::{r.get('name')}", r.get("samples", 0)) for r in weak_exits])
+            + _render_pairs("No-trade patterns per family", [(f"{r.get('family')}::{r.get('top_reason')}", r.get("top_reason_count", 0)) for r in family_patterns[:8]])
             + "## Siste tydelige feilmønstre\n"
             + recent_text
             + "\n\n## Praktisk tolkning\n"
             + f"- {interpretation}\n"
         )
 
-    def _format_paste_to_llm(self, executive_summary: str, top_candidates_md: str, failure_report_md: str) -> str:
+    def _format_paste_to_llm(self, executive_summary: str, top_candidates_md: str, failure_report_md: str, bundle: dict) -> str:
         response_format = self._format_llm_response_template()
+        attr = bundle.get("family_filter_exit_attribution") or {}
+        no_trade = bundle.get("no_trade_intelligence") or {}
+        family_lines = "\n".join(
+            f"- {row.get('family')}: avg_edge={row.get('avg_edge')} samples={row.get('samples')}"
+            for row in (attr.get("family_summary") or [])[:6]
+        ) or f"- {NOT_AVAILABLE}"
+        no_trade_lines = "\n".join(f"- {name}: {count}" for name, count in (no_trade.get("top_reasons") or [])[:6]) or f"- {NOT_AVAILABLE}"
         return (
             "# Paste to LLM\n\n"
             "## Systeminstruksjon til LLM\n"
@@ -252,6 +279,10 @@ class ResearchBundleExporter:
             f"{top_candidates_md}\n\n"
             "## Failure patterns\n\n"
             f"{failure_report_md}\n\n"
+            "## Family/filter/exit attribution snapshot\n"
+            f"{family_lines}\n\n"
+            "## No-trade intelligence snapshot\n"
+            f"{no_trade_lines}\n\n"
             "## Oppgave til LLM\n"
             "Foreslå 8 konkrete neste steg fordelt på: (1) config changes, (2) search-space changes, (3) regime/selector changes, (4) nye strategy ideas.\n"
             "Skriv svaret ditt i nøyaktig formatet under. Ikke bruk andre toppnivå-felt.\n\n"
@@ -321,6 +352,13 @@ class ResearchBundleExporter:
         top_candidates = candidates[:12]
         candidate_state_counts = dict(Counter(row.get("current_state", NOT_AVAILABLE) for row in candidates))
         failure_patterns = self._failure_patterns(candidates, status, engine_state)
+        attribution = build_family_filter_exit_attribution(candidates, ranking if isinstance(ranking, dict) else {})
+        no_trade = summarize_no_trade_intelligence(status.get("no_trade_diagnostics") or engine_state.get("no_trade_diagnostics") or {})
+
+        promising_filters = [x for x in (attribution.get("filter_module_summary") or []) if x.get("impact") == "improves"][:8]
+        dead_end_filters = [x for x in (attribution.get("filter_module_summary") or []) if x.get("impact") == "harms"][:8]
+        promising_exits = [x for x in (attribution.get("exit_pack_summary") or []) if x.get("impact") == "improves"][:8]
+        dead_end_exits = [x for x in (attribution.get("exit_pack_summary") or []) if x.get("impact") == "harms"][:8]
 
         bundle = {
             "generated_ts": time.time(),
@@ -337,6 +375,14 @@ class ResearchBundleExporter:
             "performance_memory_snapshot": self._performance_memory_snapshot(engine_state),
             "selector_summary": self._selector_summary(status),
             "top_failure_patterns": failure_patterns,
+            "family_filter_exit_attribution": attribution,
+            "no_trade_intelligence": no_trade,
+            "research_recommendations": {
+                "promising_filters": promising_filters,
+                "dead_end_filters": dead_end_filters,
+                "promising_exits": promising_exits,
+                "dead_end_exits": dead_end_exits,
+            },
             "recent_research_rankings": ranking if isinstance(ranking, dict) else {},
             "important_sources": [
                 {"path": str(self.status_path), "exists": self.status_path.exists()},
@@ -349,8 +395,8 @@ class ResearchBundleExporter:
 
         executive_summary = self._format_executive_summary(bundle)
         top_candidates_md = self._format_top_candidates(top_candidates)
-        failure_report_md = self._format_failure_report(failure_patterns)
-        paste_to_llm_md = self._format_paste_to_llm(executive_summary, top_candidates_md, failure_report_md)
+        failure_report_md = self._format_failure_report(failure_patterns, attribution, no_trade)
+        paste_to_llm_md = self._format_paste_to_llm(executive_summary, top_candidates_md, failure_report_md, bundle)
 
         return bundle, {
             "executive_summary.md": executive_summary,

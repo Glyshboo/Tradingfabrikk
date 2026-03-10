@@ -30,6 +30,12 @@ def test_export_bundle_with_status_and_registry(tmp_path):
                     {"candidate_id": "cand_b", "challenger_pnl": -1.2, "symbol": "ETHUSDT", "regime": "RANGE"}
                 ]
             },
+            "no_trade_diagnostics": {
+                "total_no_trade_events": 3,
+                "reason_counts": {"blocked_by_filter:range_quality_gate": 2, "entry_no_signal": 1},
+                "family_reason_counts": {"RangeMR": {"blocked_by_filter:range_quality_gate": 2}},
+                "family_quality": {"RangeMR": {"observed": 2, "setup_quality_sum": 0.7}},
+            },
         },
     )
     _write_json(
@@ -43,6 +49,7 @@ def test_export_bundle_with_status_and_registry(tmp_path):
                     "symbols": ["BTCUSDT"],
                     "regimes": ["TREND_UP"],
                     "meta": {"plausible": True, "recommendation": "keep_paper"},
+                    "strategy_composition": {"entry_family": "TrendCore", "filter_pack": "trend_baseline", "filter_modules": ["trend_slope_gate"], "exit_pack": "atr_trail"},
                     "artifacts": {"oos_result": {"pnl": 12.4, "sharpe_like": 1.4}},
                     "updated_ts": 100,
                 },
@@ -53,6 +60,7 @@ def test_export_bundle_with_status_and_registry(tmp_path):
                     "symbols": ["ETHUSDT"],
                     "regimes": ["RANGE"],
                     "meta": {"plausible": False, "rejection_reasons": ["weak_or_negative_out_sample_pnl"]},
+                    "strategy_composition": {"entry_family": "RangeMR", "filter_pack": "range_baseline", "filter_modules": ["range_quality_gate"], "exit_pack": "fixed_rr"},
                     "artifacts": {"oos_result": {"pnl": -2.1, "sharpe_like": -0.4}},
                     "updated_ts": 90,
                 },
@@ -93,6 +101,8 @@ def test_export_bundle_with_status_and_registry(tmp_path):
     assert bundle["mode_status_summary"]["mode"] == "paper"
     assert bundle["top_candidates"][0]["candidate_id"] == "cand_a"
     assert bundle["performance_memory_snapshot"]["total_cells"] == 1
+    assert "family_filter_exit_attribution" in bundle
+    assert "no_trade_intelligence" in bundle
 
 
 def test_export_bundle_handles_missing_inputs_fail_soft(tmp_path):
@@ -137,6 +147,9 @@ def test_research_bundle_json_has_stable_structure(tmp_path):
         "performance_memory_snapshot",
         "selector_summary",
         "top_failure_patterns",
+        "family_filter_exit_attribution",
+        "no_trade_intelligence",
+        "research_recommendations",
         "recent_research_rankings",
         "important_sources",
     }
@@ -162,6 +175,8 @@ def test_paste_to_llm_contains_required_blocks(tmp_path):
     assert "Executive summary" in paste
     assert "Top candidates" in paste
     assert "Failure patterns" in paste
+    assert "Family/filter/exit attribution snapshot" in paste
+    assert "No-trade intelligence snapshot" in paste
     assert "Påkrevd svarformat" in paste
     assert "## config_changes" in paste
     assert "## search_space_changes" in paste

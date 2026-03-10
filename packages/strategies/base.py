@@ -53,31 +53,52 @@ class StrategyEvaluator:
     default_compositions: dict[str, StrategyComposition]
 
     def evaluate(self, strategy_name: str, context: StrategyContext) -> StrategySignal | None:
+        signal, _ = self.evaluate_with_diagnostics(strategy_name, context)
+        return signal
+
+    def evaluate_with_diagnostics(self, strategy_name: str, context: StrategyContext) -> tuple[StrategySignal | None, dict]:
         composition = self._resolve_composition(strategy_name, context.config)
         if composition is None:
             strategy = self.strategies.get(strategy_name)
             if strategy is None:
-                return None
-            return strategy.generate_for_context(context)
+                return None, {"reason": "strategy_not_found"}
+            signal = strategy.generate_for_context(context)
+            return signal, {"reason": "entry_no_signal" if signal is None else "ok", "entry_family": strategy_name}
 
         entry = self.entry_families.get(composition.entry_family)
         exit_pack = self.exit_packs.get(composition.exit_pack)
         if entry is None or exit_pack is None:
-            return None
+            return None, {"reason": "invalid_composition"}
 
         signal = entry.generate_entry(context)
         if signal is None:
-            return None
+            return None, {"reason": "entry_no_signal", "entry_family": composition.entry_family, "filter_pack": composition.filter_pack, "exit_pack": composition.exit_pack}
 
         module_names = list(self.filter_packs.get(composition.filter_pack, [])) + list(composition.filter_modules)
         for module_name in module_names:
             module = self.filter_modules.get(module_name)
             if module is None:
-                return None
+                return None, {"reason": "missing_filter_module", "filter_module": module_name, "entry_family": composition.entry_family}
             if not module.allow(context, signal):
-                return None
+                return None, {
+                    "reason": f"blocked_by_filter:{module_name}",
+                    "filter_module": module_name,
+                    "entry_family": composition.entry_family,
+                    "filter_pack": composition.filter_pack,
+                    "exit_pack": composition.exit_pack,
+                }
 
-        return exit_pack.apply(context, signal)
+        out = exit_pack.apply(context, signal)
+        if out is None:
+            return None, {"reason": f"blocked_by_exit:{composition.exit_pack}", "entry_family": composition.entry_family, "exit_pack": composition.exit_pack}
+        return out, {
+            "reason": "ok",
+            "entry_family": composition.entry_family,
+            "filter_pack": composition.filter_pack,
+            "filter_modules": module_names,
+            "exit_pack": composition.exit_pack,
+            "setup_quality": float(getattr(out, "confidence", 0.0) or 0.0),
+        }
 
     def _resolve_composition(self, strategy_name: str, config: dict) -> StrategyComposition | None:
         composition_cfg = config.get("composition") if isinstance(config, dict) else None

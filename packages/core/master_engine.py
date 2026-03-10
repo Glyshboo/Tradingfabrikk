@@ -4,6 +4,7 @@ import asyncio
 import json
 import pathlib
 import time
+from collections import Counter
 
 from packages.core.candidate_runtime import CandidateRuntimeOverlayManager
 from packages.core.models import AccountState, DecisionRecord, PositionState, Regime, StrategyContext
@@ -102,6 +103,13 @@ class MasterEngine:
         self.challenger_eval_history: list[dict] = []
         self.review_context: dict = {}
         self.symbol_activity: dict[str, float] = {s: 0.0 for s in cfg["symbols"]}
+        self.no_trade_diagnostics = {
+            "total_no_trade_events": 0,
+            "reason_counts": {},
+            "family_reason_counts": {},
+            "family_quality": {},
+            "recent": [],
+        }
         ideas_dir = (cfg.get("bootstrap") or {}).get("strategy_idea_library_dir", "strategy_ideas")
         self.idea_library = StrategyIdeaLibrary(ideas_dir).report()
         self.export_refresh_service = export_refresh_service or ExportRefreshService.from_config(cfg)
@@ -232,6 +240,7 @@ class MasterEngine:
                     profile,
                 )
                 if not decision:
+                    self._record_no_trade_diagnostics(symbol, regime.value)
                     if champion.blocker:
                         self.last_decision = {
                             "symbol": symbol,
@@ -400,6 +409,7 @@ class MasterEngine:
 
     def _build_overlay_decision(self, overlay, symbol: str, regime, snap, cost_proxy: dict, exposure_penalty: float, profile) -> DecisionRecord | None:
         candidates = []
+        diagnostics: list[dict] = []
         runtime_profiles = overlay.strategy_profiles
         runtime_configs = overlay.strategy_configs
         for strat_name, config_name in runtime_profiles.get(symbol, {}).get(regime.value, []):
@@ -409,12 +419,25 @@ class MasterEngine:
             cfg_row = cfg_bucket.get(config_name)
             if not isinstance(cfg_row, dict):
                 continue
-            signal = self.strategy_evaluator.evaluate(
+            signal, diag = self.strategy_evaluator.evaluate_with_diagnostics(
                 strat_name,
                 StrategyContext(snapshot=snap, regime=regime, config=cfg_row),
             )
+            if isinstance(diag, dict):
+                diagnostics.append(
+                    {
+                        "strategy": strat_name,
+                        "config": config_name,
+                        "reason": diag.get("reason", "unknown"),
+                        "entry_family": diag.get("entry_family", strat_name),
+                        "filter_pack": diag.get("filter_pack"),
+                        "exit_pack": diag.get("exit_pack"),
+                        "setup_quality": float(diag.get("setup_quality", 0.0) or 0.0),
+                    }
+                )
             if signal:
                 candidates.append((strat_name, config_name, signal))
+        self._last_setup_diagnostics = diagnostics
         decision = self.selector.select(
             symbol,
             regime,
@@ -429,6 +452,32 @@ class MasterEngine:
         decision.runtime_model = overlay.runtime_model
         decision.overlay_candidate_id = overlay.candidate_id or ""
         return decision
+
+    def _record_no_trade_diagnostics(self, symbol: str, regime: str) -> None:
+        rows = list(getattr(self, "_last_setup_diagnostics", []) or [])
+        if not rows:
+            return
+        reason_counter = Counter(str(r.get("reason") or "unknown") for r in rows)
+        primary_reason, _ = reason_counter.most_common(1)[0]
+        self.no_trade_diagnostics["total_no_trade_events"] = int(self.no_trade_diagnostics.get("total_no_trade_events", 0)) + 1
+        reason_counts = self.no_trade_diagnostics.setdefault("reason_counts", {})
+        reason_counts[primary_reason] = int(reason_counts.get(primary_reason, 0)) + 1
+
+        family_reason = self.no_trade_diagnostics.setdefault("family_reason_counts", {})
+        family_quality = self.no_trade_diagnostics.setdefault("family_quality", {})
+        for row in rows:
+            family = str(row.get("entry_family") or row.get("strategy") or "unknown")
+            reason = str(row.get("reason") or "unknown")
+            family_bucket = family_reason.setdefault(family, {})
+            family_bucket[reason] = int(family_bucket.get(reason, 0)) + 1
+
+            quality = family_quality.setdefault(family, {"observed": 0, "setup_quality_sum": 0.0})
+            quality["observed"] = int(quality.get("observed", 0)) + 1
+            quality["setup_quality_sum"] = float(quality.get("setup_quality_sum", 0.0)) + float(row.get("setup_quality", 0.0) or 0.0)
+
+        recent = self.no_trade_diagnostics.setdefault("recent", [])
+        recent.append({"ts": time.time(), "symbol": symbol, "regime": regime, "primary_reason": primary_reason, "families": sorted({r.get("entry_family") for r in rows if r.get("entry_family")})})
+        self.no_trade_diagnostics["recent"] = recent[-50:]
 
     def _record_challenger_signal(self, challenger, decision: DecisionRecord, signal_ts: float, entry_basis: float, cost_proxy: dict) -> None:
         qty = max(0.0, self.cfg["sizing"]["base_qty"] * float(decision.sizing.get("confidence", 0.0)))
@@ -836,6 +885,7 @@ class MasterEngine:
         self.challenger_eval_history = payload.get("challenger_eval_history", [])[-1000:]
         self.performance_memory.import_state(payload.get("performance_memory_state", {}))
         self.review_context = payload.get("review_context", {})
+        self.no_trade_diagnostics = payload.get("no_trade_diagnostics", self.no_trade_diagnostics)
         self.active_micro_live = payload.get("micro_live_active", {})
         self.active_paper_candidates = payload.get("paper_candidate_active", {})
         self.active_live_full = payload.get("live_full_active", {})
@@ -855,6 +905,7 @@ class MasterEngine:
         payload["challenger_eval_history"] = self.challenger_eval_history[-1000:]
         payload["performance_memory_state"] = self.performance_memory.export_state()
         payload["review_context"] = self.review_context
+        payload["no_trade_diagnostics"] = self.no_trade_diagnostics
         payload["micro_live_active"] = self.active_micro_live
         payload["paper_candidate_active"] = self.active_paper_candidates
         payload["live_full_active"] = self.active_live_full
@@ -888,6 +939,7 @@ class MasterEngine:
                     if abs(pos.qty) > 0
                 },
                 "last_decision": self.last_decision,
+                "no_trade_diagnostics": self.no_trade_diagnostics,
                 "ws_status": self.data.stream_health(),
                 "account_sync_health": {
                     "known": self.account.known,

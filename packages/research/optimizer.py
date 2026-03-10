@@ -79,6 +79,17 @@ class ResearchOptimizer:
         cfg["base_confidence"] = self._rng.choice(base_conf)
         return cfg
 
+    def _family_priority_params(self, search_space: Dict, strategy_family: str) -> list[str]:
+        family_cfg = ((search_space.get("families") or {}).get(strategy_family) or {}) if isinstance(search_space, dict) else {}
+        from_family_cfg = family_cfg.get("mutation_priority") if isinstance(family_cfg, dict) else None
+        mutation_cfg = search_space.get("mutation", {}) if isinstance(search_space, dict) else {}
+        from_mutation_cfg = (mutation_cfg.get("mutation_family_priority_params") or {}).get(strategy_family, [])
+        merged = []
+        for key in list(from_family_cfg or []) + list(from_mutation_cfg or []):
+            if isinstance(key, str) and key not in merged:
+                merged.append(key)
+        return merged
+
     def _sample_combination(self, strategy_family: str, search_space: Dict) -> Dict:
         composition_cfg = search_space.get("composition", {}) if isinstance(search_space, dict) else {}
         filter_packs = composition_cfg.get("filter_packs", ["safe"]) if isinstance(composition_cfg, dict) else ["safe"]
@@ -130,18 +141,43 @@ class ResearchOptimizer:
         change_keys = [k for k in params.keys() if k in cfg] + ["base_confidence"]
         if not change_keys:
             return None
+
+        established = set((search_space.get("incubation", {}) or {}).get("established_entry_families", ["TrendCore", "RangeMR"]))
+        mutation_type = "config_tweak"
+        if family in established and self._rng.random() < float(mutation_cfg.get("mutate_composition_probability", 0.18)):
+            mutation_type = "combination_tweak"
+        elif family in established and self._rng.random() < float(mutation_cfg.get("allow_new_family_candidate_probability", 0.0)):
+            mutation_type = "new_family_candidate"
+
+        priority = [k for k in self._family_priority_params(search_space, family) if k in change_keys]
+        boost_prob = float(mutation_cfg.get("family_priority_boost_probability", 0.75))
+        mutation_pool = priority if priority and self._rng.random() < boost_prob else change_keys
         max_changes = max(1, int(mutation_cfg.get("max_parameter_changes", 2)))
-        change_count = self._rng.randint(1, min(max_changes, len(change_keys)))
-        for key in self._rng.sample(change_keys, k=change_count):
+        change_count = self._rng.randint(1, min(max_changes, len(mutation_pool)))
+        changed_keys: list[str] = []
+        for key in self._rng.sample(mutation_pool, k=change_count):
             options = list(search_space.get("shared_params", {}).get(key, [])) if key == "base_confidence" else list(params.get(key, []))
             if not options:
                 continue
             current = cfg.get(key)
-            cfg[key] = self._rng.choice([x for x in options if x != current] or options)
+            if current in options and len(options) >= 3:
+                idx = options.index(current)
+                left = options[max(0, idx - 1)]
+                right = options[min(len(options) - 1, idx + 1)]
+                neighborhood = [x for x in {left, right, current} if x != current]
+                cfg[key] = self._rng.choice(neighborhood or [x for x in options if x != current] or options)
+            else:
+                cfg[key] = self._rng.choice([x for x in options if x != current] or options)
+            changed_keys.append(key)
 
         keep_comp_prob = float(mutation_cfg.get("keep_composition_probability", 0.85))
-        if self._rng.random() > keep_comp_prob:
+        if mutation_type == "combination_tweak" and self._rng.random() > keep_comp_prob:
             cfg["composition"] = self._sample_combination(family, search_space)
+        cfg["mutation_trace"] = {
+            "mutation_type": mutation_type,
+            "family_priority_used": bool(priority and mutation_pool == priority),
+            "changed_keys": changed_keys,
+        }
         return cfg
 
     def _as_payload(self, res: BacktestResult) -> Dict:
@@ -180,15 +216,18 @@ class ResearchOptimizer:
         bars: int,
         cfg: Dict,
         thresholds: Dict,
+        strategy_family: str | None = None,
     ) -> Dict:
-        min_in_sample_trades = int(thresholds.get("min_in_sample_trades", 4))
-        min_out_sample_trades = int(thresholds.get("min_out_sample_trades", 4))
-        min_out_sample_pnl = float(thresholds.get("min_out_sample_pnl", 0.0))
-        min_out_sample_sharpe = float(thresholds.get("min_out_sample_sharpe", -0.02))
-        min_oos_is_pnl_ratio = float(thresholds.get("min_oos_is_pnl_ratio", 0.15))
-        max_turnover_per_bar = float(thresholds.get("max_turnover_per_bar", 350.0))
-        max_cost_to_gross_ratio = float(thresholds.get("max_cost_to_gross_ratio", 0.85))
-        max_confidence = float(thresholds.get("max_base_confidence", 0.75))
+        family_overrides = (thresholds.get("family_threshold_overrides") or {}).get(strategy_family or "", {}) if isinstance(thresholds, dict) else {}
+        merged_thresholds = {**(thresholds or {}), **(family_overrides if isinstance(family_overrides, dict) else {})}
+        min_in_sample_trades = int(merged_thresholds.get("min_in_sample_trades", 4))
+        min_out_sample_trades = int(merged_thresholds.get("min_out_sample_trades", 4))
+        min_out_sample_pnl = float(merged_thresholds.get("min_out_sample_pnl", 0.0))
+        min_out_sample_sharpe = float(merged_thresholds.get("min_out_sample_sharpe", -0.02))
+        min_oos_is_pnl_ratio = float(merged_thresholds.get("min_oos_is_pnl_ratio", 0.15))
+        max_turnover_per_bar = float(merged_thresholds.get("max_turnover_per_bar", 350.0))
+        max_cost_to_gross_ratio = float(merged_thresholds.get("max_cost_to_gross_ratio", 0.85))
+        max_confidence = float(merged_thresholds.get("max_base_confidence", 0.75))
 
         reasons: list[str] = []
         turnover_per_bar = out_sample.turnover / max(1.0, float(bars))
@@ -266,6 +305,7 @@ class ResearchOptimizer:
                 "max_cost_to_gross_ratio": max_cost_to_gross_ratio,
                 "max_base_confidence": max_confidence,
             },
+            "family_overrides": family_overrides if isinstance(family_overrides, dict) else {},
         }
 
     def random_search(
@@ -335,6 +375,7 @@ class ResearchOptimizer:
                             bars=len(candles),
                             cfg=cfg,
                             thresholds=thresholds,
+                            strategy_family=strategy_family,
                         )
                         config_name = f"{symbol.lower()}_{regime.lower()}_{strategy_family.lower()}_{sequence}"
                         sequence += 1
@@ -369,6 +410,7 @@ class ResearchOptimizer:
                             },
                             "fees": {"fee_bps": round(fee_bps, 6), "slippage_bps": round(slippage_bps, 6)},
                             "strategy_config": cfg,
+                            "mutation_type": "seed",
                             "strategy_config_patch": {strategy_family: {config_name: cfg}},
                             "strategy_profile_patch": {symbol: {regime: [[strategy_family, config_name]]}},
                             "idea_id": matching_idea.get("id") if matching_idea else None,
@@ -406,6 +448,7 @@ class ResearchOptimizer:
                             bars=len(candles),
                             cfg=mut_cfg,
                             thresholds=thresholds,
+                            strategy_family=family,
                         )
                         config_name = f"{seed['id']}_mut{refine_idx}"
                         composition = self._strategy_composition_descriptor(family, mut_cfg)
@@ -422,6 +465,8 @@ class ResearchOptimizer:
                             "evaluation": eval_result,
                             "pnl": out_sample.pnl,
                             "strategy_config": mut_cfg,
+                            "mutation_type": (mut_cfg.get("mutation_trace") or {}).get("mutation_type", "config_tweak"),
+                            "mutation_trace": mut_cfg.get("mutation_trace", {}),
                             "strategy_config_patch": {family: {config_name: mut_cfg}},
                             "strategy_profile_patch": {symbol: {regime: [[family, config_name]]}},
                             "walk_forward": {

@@ -179,3 +179,42 @@ def test_mutation_refines_without_full_random_reset() -> None:
     assert mutated["composition"] == seed["strategy_config"]["composition"]
     changed = [k for k in ["atr_stop_mult", "time_stop_bars", "base_confidence"] if mutated[k] != seed["strategy_config"][k]]
     assert 1 <= len(changed) <= 2
+    assert mutated["mutation_trace"]["mutation_type"] in {"config_tweak", "combination_tweak", "new_family_candidate"}
+
+
+def test_family_aware_mutation_prioritizes_family_keys() -> None:
+    optimizer = ResearchOptimizer(seed=5)
+    space = {
+        "mutation": {
+            "max_parameter_changes": 1,
+            "plausible_min_score": 0.1,
+            "keep_composition_probability": 1.0,
+            "family_priority_boost_probability": 1.0,
+        },
+        "families": {
+            "BreakoutRetest": {
+                "mutation_priority": ["min_range_compression"],
+                "params": {
+                    "min_range_compression": [0.15, 0.2, 0.3],
+                    "atr_stop_mult": [1.5, 1.8, 2.2],
+                },
+            }
+        },
+        "shared_params": {"base_confidence": [0.54, 0.58]},
+    }
+    seed = {
+        "plausible": True,
+        "score": 1.0,
+        "strategy_family": "BreakoutRetest",
+        "strategy_config": {
+            "min_range_compression": 0.2,
+            "atr_stop_mult": 1.8,
+            "base_confidence": 0.54,
+            "composition": {"entry_family": "BreakoutRetest", "filter_pack": "safe", "filter_modules": [], "exit_pack": "passthrough"},
+        },
+    }
+
+    mutated = optimizer._mutate_candidate(seed, space)
+    assert mutated is not None
+    assert mutated["mutation_trace"]["family_priority_used"] is True
+    assert mutated["mutation_trace"]["changed_keys"] == ["min_range_compression"]

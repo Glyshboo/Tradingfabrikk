@@ -662,6 +662,9 @@ class MasterEngine:
                     "take_profit": decision.sizing.get("take_profit"),
                     "time_stop_bars": decision.sizing.get("time_stop_bars", 0),
                     "trail_mult": decision.sizing.get("trail_mult", 1.5),
+                    "exit_pack": decision.sizing.get("exit_pack", "passthrough"),
+                    "partial_take_profit": decision.sizing.get("partial_take_profit"),
+                    "partial_fraction": decision.sizing.get("partial_fraction", 0.0),
                 },
             )
 
@@ -671,16 +674,24 @@ class MasterEngine:
             self.position_mgr.clear(symbol)
             return
         side = "SELL" if pos.qty > 0 else "BUY"
-        order = format_order(symbol, side, abs(pos.qty), reduce_only=True)
+        qty = abs(pos.qty)
+        if reason == "partial_take_profit":
+            partial_fraction = float(self.position_mgr.state.get(symbol, {}).get("partial_fraction", 0.5))
+            reduced_qty = self.position_mgr.reduce_position(symbol, partial_fraction)
+            qty = min(qty, max(0.0, reduced_qty))
+            if qty <= 0:
+                return
+        order = format_order(symbol, side, qty, reduce_only=True)
         rr = self.risk.evaluate_order(order, self.account, self.data.market)
         if not rr.allowed:
             return
         await self.execution.place_order(order)
         fill_price = self.data.get_snapshot(symbol).price if self.data.get_snapshot(symbol) else pos.entry_price
         if self.cfg.get("mode") == "paper":
-            self.data.apply_paper_fill(symbol, side, abs(pos.qty), fill_price, reduce_only=True)
+            self.data.apply_paper_fill(symbol, side, qty, fill_price, reduce_only=True)
             self._sync_account_from_data_state()
-        self.position_mgr.clear(symbol)
+        if reason != "partial_take_profit" or abs(self.account.positions.get(symbol, PositionState(symbol=symbol)).qty) <= 0:
+            self.position_mgr.clear(symbol)
 
     def _sync_account_from_data_state(self) -> None:
         if self.data.account_state.get("equity") is not None:

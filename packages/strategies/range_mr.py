@@ -22,13 +22,16 @@ class RangeMR(StrategyPlugin):
             side = "SELL"
         else:
             return None
-        stop = snapshot.price - snapshot.atr if side == "BUY" else snapshot.price + snapshot.atr
+        atr_stop_mult = float(config.get("atr_stop_mult", 1.0))
+        tp_mult = float(config.get("take_profit_atr_mult", 0.2))
+        stop = snapshot.price - snapshot.atr * atr_stop_mult if side == "BUY" else snapshot.price + snapshot.atr * atr_stop_mult
+        take_profit = snapshot.price + snapshot.atr * tp_mult if side == "BUY" else snapshot.price - snapshot.atr * tp_mult
         return StrategySignal(
             symbol=snapshot.symbol,
             side=side,
             confidence=float(config.get("base_confidence", 0.52)),
             stop_price=stop,
-            take_profit=snapshot.price,
+            take_profit=take_profit,
             reason="range_mean_reversion",
             meta={"rsi": snapshot.rsi},
         )

@@ -14,6 +14,10 @@ class BacktestResult:
     trades: int
     pnl: float
     sharpe_like: float
+    gross_pnl: float = 0.0
+    total_cost: float = 0.0
+    max_drawdown: float = 0.0
+    turnover: float = 0.0
 
 
 class CandleBacktester:
@@ -75,8 +79,11 @@ class CandleBacktester:
         rs = avg_gain / avg_loss
         return 100 - (100 / (1 + rs))
 
-    def _snapshot_for_bar(self, candles: list[dict], i: int) -> MarketSnapshot:
+    def _snapshot_for_bar(self, candles: list[dict], i: int, strategy_config: dict | None = None) -> MarketSnapshot:
         close = float(candles[i]["close"])
+        cfg = strategy_config or {}
+        atr_period = int(cfg.get("atr_period", 14))
+        rsi_period = int(cfg.get("rsi_period", 14))
         # Backtest bruker candle-close syntetisk spread=0 for deterministisk signalparitet.
         return MarketSnapshot(
             symbol="BACKTEST",
@@ -84,13 +91,13 @@ class CandleBacktester:
             bid=close,
             ask=close,
             candle_close=float(candles[i - 1]["close"]) if i > 0 else close,
-            atr=self._compute_atr(candles, i),
-            rsi=self._compute_rsi(candles, i),
+            atr=self._compute_atr(candles, i, period=max(2, atr_period)),
+            rsi=self._compute_rsi(candles, i, period=max(2, rsi_period)),
             ts=float(i),
         )
 
     def _signal_for_bar(self, strategy_family: str, candles: list[dict], i: int, strategy_config: dict | None = None) -> int:
-        snapshot = self._snapshot_for_bar(candles, i)
+        snapshot = self._snapshot_for_bar(candles, i, strategy_config=strategy_config)
         regime = self.regime_engine.classify(snapshot)
         return self.signal_for_snapshot(strategy_family, snapshot, regime, strategy_config)
 
@@ -124,8 +131,14 @@ class CandleBacktester:
         if len(candles) < 4:
             return BacktestResult(0, 0.0, 0.0)
         pnl = 0.0
+        gross_pnl = 0.0
+        total_cost = 0.0
         trades = 0
         prev_pos = 0
+        turnover = 0.0
+        equity = 0.0
+        peak_equity = 0.0
+        max_drawdown = 0.0
         costs_bps = (fee_bps + slippage_bps + funding_bps_per_bar) / 10000
         for i in range(2, len(candles)):
             position = self._signal_for_bar(strategy_family, candles, i - 1, strategy_config)
@@ -133,14 +146,35 @@ class CandleBacktester:
             close_prev = candles[i - 1]["close"]
             ret = 0.0 if close_prev <= 0 else (close_now - close_prev) / close_prev
             if position != 0:
-                pnl += position * ret * close_now
-                pnl -= close_now * costs_bps
+                gross_leg = position * ret * close_now
+                cost_leg = close_now * costs_bps
+                gross_pnl += gross_leg
+                total_cost += cost_leg
+                pnl += gross_leg - cost_leg
                 trades += 1
+                turnover += abs(position) * close_now
             if prev_pos != 0 and position != prev_pos:
-                pnl -= close_now * costs_bps
+                flip_cost = close_now * costs_bps
+                total_cost += flip_cost
+                pnl -= flip_cost
+                turnover += abs(prev_pos - position) * close_now
             prev_pos = position
+            equity = pnl
+            if equity > peak_equity:
+                peak_equity = equity
+            drawdown = peak_equity - equity
+            if drawdown > max_drawdown:
+                max_drawdown = drawdown
         sharpe_like = pnl / max(1.0, trades**0.5)
-        return BacktestResult(trades=trades, pnl=round(pnl, 6), sharpe_like=round(sharpe_like, 6))
+        return BacktestResult(
+            trades=trades,
+            pnl=round(pnl, 6),
+            sharpe_like=round(sharpe_like, 6),
+            gross_pnl=round(gross_pnl, 6),
+            total_cost=round(total_cost, 6),
+            max_drawdown=round(max_drawdown, 6),
+            turnover=round(turnover, 6),
+        )
 
     def run_walk_forward(
         self,

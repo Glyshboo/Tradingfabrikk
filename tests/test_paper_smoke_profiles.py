@@ -32,3 +32,29 @@ def test_paper_smoke_uses_stricter_threshold_for_new_family(tmp_path, monkeypatc
     actions = worker.process()
     assert actions[0]["result"]["status"] == "fail"
     assert actions[0]["result"]["required_min_trades"] == 5
+
+
+def test_paper_smoke_applies_extra_strictness_for_low_trust(tmp_path, monkeypatch):
+    reg = CandidateRegistry(str(tmp_path / "registry.json"))
+    reg.register(
+        "cand_low",
+        1.0,
+        {
+            "symbols": ["BTCUSDT"],
+            "regimes": ["RANGE"],
+            "strategy_family": "TrendCore",
+            "candidate_kind": "config_tweak",
+            "onboarding_assessment": {"trust_score": 0.3},
+            "config_patch": {"TrendCore": {}},
+        },
+    )
+    reg.transition("cand_low", "paper_smoke_running")
+
+    cfg = {"symbols": ["BTCUSDT"], "paper_smoke": {"bars": 20, "min_trades": 2, "min_pnl": 0.0}, "paper_smoke_profiles": {}}
+    worker = PaperSmokeWorker(reg, cfg)
+    monkeypatch.setattr(worker._dm, "load_historical_candles", lambda **kwargs: [{"close": 1}] * 12)
+    monkeypatch.setattr(worker.bt, "run", lambda *args, **kwargs: BacktestResult(trades=2, pnl=0.02, sharpe_like=0.2, gross_pnl=0.6, total_cost=0.3, max_drawdown=0.2, turnover=10))
+
+    actions = worker.process()
+    assert actions[0]["result"]["status"] == "fail"
+    assert actions[0]["result"]["required_min_trades"] == 3

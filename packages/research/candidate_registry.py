@@ -61,6 +61,8 @@ class CandidateRegistry:
         data = self._load()
         row = data["candidates"].get(candidate_id, {})
         now = time.time()
+        onboarding = meta.get("onboarding_assessment") if isinstance(meta.get("onboarding_assessment"), dict) else {}
+        trust_score = float(onboarding.get("trust_score", meta.get("trust_score", 0.5)) or 0.5)
         row.update(
             {
                 "state": "idea_proposed",
@@ -71,6 +73,7 @@ class CandidateRegistry:
                 "track": meta.get("track", "fast"),
                 "provider": meta.get("provider_used", "unknown"),
                 "strategy_family": meta.get("strategy_family"),
+                "trust_score": trust_score,
                 "symbols": meta.get("symbols") or ([meta["symbol"]] if meta.get("symbol") else []),
                 "regimes": meta.get("regimes") or ([meta["regime"]] if meta.get("regime") else []),
                 "artifacts": {
@@ -91,6 +94,11 @@ class CandidateRegistry:
                     "artifact_bundle": meta.get("artifact_bundle"),
                     "code_change": bool(meta.get("code_change", False)),
                     "strategy_composition": meta.get("strategy_composition", {}),
+                    "onboarding_assessment": onboarding,
+                    "complexity_summary": meta.get("complexity_summary") or onboarding.get("complexity_summary", {}),
+                    "novelty_summary": meta.get("novelty_summary") or onboarding.get("novelty_summary", {}),
+                    "mutation_trace": meta.get("mutation_trace", {}),
+                    "mutation_source_id": meta.get("mutation_source_id"),
                 },
                 "updated_ts": now,
                 "history": row.get("history", []) + [{"state": "idea_proposed", "ts": now}],

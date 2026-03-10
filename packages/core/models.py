@@ -22,6 +22,18 @@ class MarketSnapshot:
     candle_close: Optional[float] = None
     atr: Optional[float] = None
     rsi: Optional[float] = None
+    trend_slope: Optional[float] = None
+    realized_volatility: Optional[float] = None
+    spread_bps: Optional[float] = None
+    atr_pct_of_price: Optional[float] = None
+    session_bucket: Optional[str] = None
+    hour_bucket: Optional[int] = None
+    range_compression_score: Optional[float] = None
+    breakout_distance_from_recent_range: Optional[float] = None
+    rsi_1h: Optional[float] = None
+    rsi_4h: Optional[float] = None
+    atr_1h: Optional[float] = None
+    atr_4h: Optional[float] = None
     ts: float = 0.0
 
 

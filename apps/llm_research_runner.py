@@ -49,6 +49,7 @@ def _compact_research_bundle(status_file: str, ideas_dir: str = "strategy_ideas"
     return {
         "recent_performance": status.get("risk_caps_status", {}),
         "regime_distribution": status.get("current_regime", {}),
+        "market_features": status.get("market_features", {}),
         "top_failure_cases": [status.get("last_decision", {}).get("blocked_reason")],
         "spread_slippage_funding": status.get("last_decision", {}).get("score_components", {}),
         "execution_quality": {

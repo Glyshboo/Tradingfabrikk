@@ -185,8 +185,9 @@ class MasterEngine:
                     continue
                 runtime_selection = self.overlay_mgr.resolve_runtime(symbol, regime.value, self.cfg.get("mode", "paper"))
                 champion = runtime_selection.champion
+                spread_cost = (snap.spread_bps / 10000) if snap.spread_bps is not None else (snap.ask - snap.bid) / max(snap.price, 1e-9)
                 cost_proxy = {
-                    "spread": (snap.ask - snap.bid) / max(snap.price, 1e-9),
+                    "spread": spread_cost,
                     "slippage": self.profile_mgr.profiles.get(symbol).slippage_proxy if symbol in self.profile_mgr.profiles else 0.0,
                     "funding": self.profile_mgr.profiles.get(symbol).funding_behavior if symbol in self.profile_mgr.profiles else 0.0,
                 }
@@ -572,6 +573,26 @@ class MasterEngine:
                     "last_event_age_sec": self.data.stream_health().get("account_last_event_age_sec"),
                 },
                 "current_regime": self.current_regimes,
+                "market_features": {
+                    sym: {
+                        "price": snap.price,
+                        "atr": snap.atr,
+                        "rsi": snap.rsi,
+                        "trend_slope": snap.trend_slope,
+                        "realized_volatility": snap.realized_volatility,
+                        "spread_bps": snap.spread_bps,
+                        "atr_pct_of_price": snap.atr_pct_of_price,
+                        "session_bucket": snap.session_bucket,
+                        "hour_bucket": snap.hour_bucket,
+                        "range_compression_score": snap.range_compression_score,
+                        "breakout_distance_from_recent_range": snap.breakout_distance_from_recent_range,
+                        "rsi_1h": snap.rsi_1h,
+                        "rsi_4h": snap.rsi_4h,
+                        "atr_1h": snap.atr_1h,
+                        "atr_4h": snap.atr_4h,
+                    }
+                    for sym, snap in self.data.market.items()
+                },
                 "safe_pause": self.risk.safe_pause,
                 "reduce_only": self.risk.reduce_only_mode,
                 "candidate_registry": self.candidate_registry.report(),

@@ -44,6 +44,7 @@ def main() -> None:
         "ws_status": status.get("ws_status", {}),
         "account_sync_health": status.get("account_sync_health", {}),
         "current_regime": status.get("current_regime", {}),
+        "market_features": status.get("market_features", {}),
         "risk_caps_status": status.get("risk_caps_status", {}),
         "safe_pause": status.get("safe_pause"),
         "reduce_only": status.get("reduce_only"),

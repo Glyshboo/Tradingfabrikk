@@ -162,4 +162,38 @@ def test_paste_to_llm_contains_required_blocks(tmp_path):
     assert "Executive summary" in paste
     assert "Top candidates" in paste
     assert "Failure patterns" in paste
+    assert "Påkrevd svarformat" in paste
+    assert "## config_changes" in paste
+    assert "## search_space_changes" in paste
+    assert "## regime_or_selector_changes" in paste
+    assert "## new_strategy_ideas" in paste
+    assert "## requires_code" in paste
     assert "Unngå overfitting" in paste
+
+
+def test_export_writes_llm_response_template_file(tmp_path):
+    exporter = ResearchBundleExporter(
+        registry_file=str(tmp_path / "registry.json"),
+        status_file=str(tmp_path / "status.json"),
+        engine_state_file=str(tmp_path / "engine_state.json"),
+        review_queue_file=str(tmp_path / "review.json"),
+        output_dir=str(tmp_path / "llm_exports"),
+    )
+    exporter.export()
+
+    template = (tmp_path / "llm_exports" / "llm_response_template.md").read_text(encoding="utf-8")
+    assert "# LLM Research Response" in template
+    assert "## config_changes" in template
+    assert "## search_space_changes" in template
+    assert "## regime_or_selector_changes" in template
+    assert "## new_strategy_ideas" in template
+    assert "## requires_code" in template
+
+
+def test_manual_workflow_doc_references_expected_files():
+    doc = "docs/manual_llm_workflow.md"
+    content = open(doc, encoding="utf-8").read()
+
+    assert "runtime/llm_exports/paste_to_llm.md" in content
+    assert "runtime/llm_exports/llm_response_template.md" in content
+    assert "apps/export_research_bundle.py" in content

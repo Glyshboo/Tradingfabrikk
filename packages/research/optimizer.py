@@ -47,6 +47,22 @@ class ResearchOptimizer:
             "turnover": res.turnover,
         }
 
+    def _strategy_composition_descriptor(self, strategy_family: str, cfg: Dict) -> Dict:
+        composition = cfg.get("composition", {}) if isinstance(cfg, dict) else {}
+        if isinstance(composition, dict) and composition.get("entry_family"):
+            return {
+                "entry_family": composition.get("entry_family"),
+                "filter_pack": composition.get("filter_pack", "none"),
+                "filter_modules": composition.get("filter_modules", []),
+                "exit_pack": composition.get("exit_pack", "passthrough"),
+            }
+        return {
+            "entry_family": strategy_family,
+            "filter_pack": "safe",
+            "filter_modules": [],
+            "exit_pack": "passthrough",
+        }
+
     def _evaluate_candidate(
         self,
         in_sample: BacktestResult,
@@ -218,6 +234,7 @@ class ResearchOptimizer:
                             "symbol": symbol,
                             "regime": regime,
                             "strategy_family": strategy_family,
+                            "strategy_composition": self._strategy_composition_descriptor(strategy_family, cfg),
                             "score": eval_result["score"],
                             "plausible": eval_result["plausible"],
                             "rejection_reasons": eval_result["rejection_reasons"],

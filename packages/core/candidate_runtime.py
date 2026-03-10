@@ -232,6 +232,6 @@ class CandidateRuntimeOverlayManager:
             return "micro_live"
         if state in {"approved_for_live_full", "live_full_active"} and mode == "live":
             return "live_full"
-        if state in {"paper_candidate_active", "paper_candidate_paused"} and mode == "paper":
+        if state in {"paper_candidate_active", "paper_candidate_paused", "paper_candidate_winning", "paper_candidate_fading", "challenger_active", "challenger_evaluated"} and mode == "paper":
             return "paper_candidate"
         return None

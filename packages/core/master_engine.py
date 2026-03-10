@@ -247,6 +247,7 @@ class MasterEngine:
         return hot + cold
 
     def _sync_candidate_state_machine(self) -> None:
+        self._auto_progress_paper_lifecycle()
         approved_micro = self.candidate_registry.list_by_state(["approved_for_micro_live", "micro_live_recovering", "micro_live_resumed", "micro_live_active"])
         self.active_micro_live = {}
         for row in approved_micro:
@@ -270,18 +271,50 @@ class MasterEngine:
                 self.candidate_registry.transition(cid, "live_full_active")
 
         self.active_paper_candidates = {}
-        for row in self.candidate_registry.list_by_state(["paper_candidate_active", "paper_candidate_paused"]):
+        for row in self.candidate_registry.list_by_state(["paper_candidate_active", "paper_candidate_paused", "paper_candidate_winning", "paper_candidate_fading", "challenger_active", "challenger_evaluated"]):
             cid = row.get("id")
             if not cid:
                 continue
             symbols = row.get("symbols") or row.get("meta", {}).get("symbols") or []
             self.active_paper_candidates[cid] = {"symbols": symbols, "state": row.get("state"), "started_ts": row.get("updated_ts")}
 
-        runtime_rows = approved_micro + list(self.candidate_registry.list_by_state(["approved_for_live_full", "live_full_active", "paper_candidate_active", "paper_candidate_paused"]))
+        runtime_rows = approved_micro + list(self.candidate_registry.list_by_state(["approved_for_live_full", "live_full_active", "paper_candidate_active", "paper_candidate_paused", "paper_candidate_winning", "paper_candidate_fading", "challenger_active", "challenger_evaluated"]))
         self.overlay_mgr.rebuild(runtime_rows, self.cfg.get("mode", "paper"))
         self._evaluate_paper_trade_outcomes()
         self._evaluate_challenger_signals()
         self._evaluate_paper_candidates()
+
+    def _auto_progress_paper_lifecycle(self) -> None:
+        transitions = [
+            ("backtest_pass", "paper_smoke_running", "auto:start_paper_smoke"),
+            ("paper_smoke_pass", "challenger_active", "auto:smoke_passed"),
+            ("challenger_active", "paper_candidate_active", "auto:challenger_started"),
+            ("paper_candidate_pass", "ready_for_review", "auto:paper_candidate_passed"),
+        ]
+        for src, dst, reason in transitions:
+            for row in self.candidate_registry.list_by_state([src]):
+                cid = row.get("id")
+                if not cid:
+                    continue
+                self.candidate_registry.update_meta(cid, meta_patch={"lifecycle_reason": reason})
+                self.candidate_registry.transition(cid, dst)
+                if dst == "ready_for_review":
+                    self.candidate_registry.ensure_review_queued(self.review_queue, cid, reason="paper_candidate_pass")
+
+        for row in self.candidate_registry.list_by_state(["paper_candidate_fail"]):
+            cid = row.get("id")
+            if not cid:
+                continue
+            self.candidate_registry.update_meta(cid, meta_patch={"lifecycle_reason": "auto:paper_candidate_failed", "runtime_hold": True})
+            self.candidate_registry.transition(cid, "needs_revalidation")
+
+        for row in self.candidate_registry.list_by_state(["edge_decay"]):
+            cid = row.get("id")
+            if not cid:
+                continue
+            self.candidate_registry.update_meta(cid, meta_patch={"lifecycle_reason": "auto:edge_decay_detected", "runtime_hold": True})
+            self.candidate_registry.transition(cid, "paper_candidate_paused")
+            self.candidate_registry.transition(cid, "needs_revalidation")
 
     def _build_overlay_decision(self, overlay, symbol: str, regime, snap, cost_proxy: dict, exposure_penalty: float, profile) -> DecisionRecord | None:
         candidates = []
@@ -431,9 +464,13 @@ class MasterEngine:
             return
         window_sec = float(self.paper_candidate_cfg.get("window_sec", 300) or 300)
         min_trades = int(self.paper_candidate_cfg.get("min_trades", 1) or 1)
+        winning_avg_pnl = float(self.paper_candidate_cfg.get("winning_avg_pnl", 0.0) or 0.0)
+        fade_avg_pnl = float(self.paper_candidate_cfg.get("fade_avg_pnl", -0.01) or -0.01)
+        edge_decay_avg_pnl = float(self.paper_candidate_cfg.get("edge_decay_avg_pnl", -0.05) or -0.05)
+        max_negative_ratio = float(self.paper_candidate_cfg.get("max_negative_ratio", 0.7) or 0.7)
         now = time.time()
         for cid, row in self.active_paper_candidates.items():
-            if row.get("state") != "paper_candidate_active":
+            if row.get("state") not in {"paper_candidate_active", "paper_candidate_winning", "paper_candidate_fading", "challenger_active", "challenger_evaluated"}:
                 continue
             started = float(row.get("started_ts") or now)
             if now - started < window_sec:
@@ -444,10 +481,42 @@ class MasterEngine:
                 and x.get("status") == "evaluated"
                 and now - float(x.get("result_ts", 0)) <= window_sec
             ]
-            next_state = "paper_candidate_pass" if len(evaluations) >= min_trades else "paper_candidate_fail"
             avg_pnl = (sum(float(x.get("result_pnl") or 0.0) for x in evaluations) / len(evaluations)) if evaluations else 0.0
-            self.candidate_registry.update_meta(cid, artifacts_patch={"paper_challenger_result": {"evaluated": len(evaluations), "avg_pnl": avg_pnl, "window_sec": window_sec, "ts": now}})
-            self.candidate_registry.transition(cid, next_state)
+            negative_ratio = (
+                sum(1 for x in evaluations if float(x.get("result_pnl") or 0.0) < 0) / len(evaluations)
+                if evaluations
+                else 1.0
+            )
+            self.candidate_registry.transition(cid, "challenger_evaluated")
+            self.candidate_registry.update_meta(
+                cid,
+                artifacts_patch={
+                    "paper_challenger_result": {
+                        "evaluated": len(evaluations),
+                        "avg_pnl": avg_pnl,
+                        "negative_ratio": negative_ratio,
+                        "window_sec": window_sec,
+                        "ts": now,
+                    }
+                },
+            )
+            if len(evaluations) < min_trades:
+                self.candidate_registry.update_meta(cid, meta_patch={"lifecycle_reason": "paper:no_signal_density"})
+                self.candidate_registry.transition(cid, "paper_candidate_fail")
+                continue
+            if avg_pnl <= edge_decay_avg_pnl or negative_ratio > max_negative_ratio:
+                self.candidate_registry.update_meta(cid, meta_patch={"lifecycle_reason": "paper:edge_decay"})
+                self.candidate_registry.transition(cid, "paper_candidate_fading")
+                self.candidate_registry.transition(cid, "edge_decay")
+                continue
+            if avg_pnl <= fade_avg_pnl:
+                self.candidate_registry.update_meta(cid, meta_patch={"lifecycle_reason": "paper:fading_momentum"})
+                self.candidate_registry.transition(cid, "paper_candidate_fading")
+                continue
+            if avg_pnl >= winning_avg_pnl:
+                self.candidate_registry.update_meta(cid, meta_patch={"lifecycle_reason": "paper:winning"})
+                self.candidate_registry.transition(cid, "paper_candidate_winning")
+                self.candidate_registry.transition(cid, "paper_candidate_pass")
 
     async def _execute_decision(self, decision: DecisionRecord) -> None:
         side = decision.selected_side

@@ -13,7 +13,6 @@ from packages.profiles.symbol_profile import SymbolProfile
 from packages.research.candidate_registry import CandidateRegistry
 from packages.research.optimizer import ResearchOptimizer
 from packages.research.strategy_ideas import StrategyIdeaLibrary
-from packages.review.review_queue import ReviewQueue
 
 
 def _load_yaml_or_config(path: str) -> dict:
@@ -98,7 +97,6 @@ def run_research(
         top = rows[0]["score"] if rows else "n/a"
         print(f"  {key} -> top_score={top}")
     registry = CandidateRegistry()
-    review_queue = ReviewQueue()
     artifact_root = pathlib.Path("runtime/review_artifacts")
     artifact_root.mkdir(parents=True, exist_ok=True)
     for rows in ranking.values():
@@ -173,30 +171,6 @@ def run_research(
             })
             registry.transition(row["id"], "config_generated")
             registry.transition(row["id"], "backtest_pass")
-            registry.transition(row["id"], "ready_for_review")
-            review_queue.enqueue({
-                "id": row["id"],
-                "type": candidate_type,
-                "symbols": [row["symbol"]],
-                "regimes": [row["regime"]],
-                "strategy_family": row.get("strategy_family"),
-                "provider": row.get("provider", "research_optimizer"),
-                "track": track,
-                "backtest_result": row.get("walk_forward"),
-                "oos_result": (row.get("walk_forward") or {}).get("out_sample"),
-                "paper_smoke_result": row.get("paper_smoke_result"),
-                "config_patch": row.get("strategy_config_patch"),
-                "warnings": row.get("warnings", []),
-                "recommendation": row.get("recommendation", "manual_review"),
-                "trigger_source": trigger_source,
-                "trigger_reasons": trigger_reasons or ["manual"],
-                "trigger_context": trigger_context or {},
-                "created_ts": time.time(),
-                "artifacts": {
-                    "summary": summary,
-                    "bundle": str(candidate_dir),
-                },
-            })
     bootstrap = {
         "idea_library": {
             "total": ideas.get("total", 0),

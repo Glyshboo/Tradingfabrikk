@@ -51,7 +51,11 @@ class PaperSmokeWorker:
                     "pnl": bt_result.pnl,
                     "sharpe_like": bt_result.sharpe_like,
                 }
-            self.registry.update_meta(row["id"], artifacts_patch={"paper_smoke_result": result})
-            self.registry.transition(row["id"], "paper_smoke_pass" if passed else "validation_failed")
+            self.registry.update_meta(
+                row["id"],
+                meta_patch={"lifecycle_reason": "paper_smoke_pass" if passed else "paper_smoke_fail"},
+                artifacts_patch={"paper_smoke_result": result},
+            )
+            self.registry.transition(row["id"], "paper_smoke_pass" if passed else "paper_candidate_fail")
             actions.append({"id": row["id"], "result": result})
         return actions

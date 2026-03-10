@@ -15,6 +15,12 @@ class OverlayResolution:
     blocker: str | None = None
 
 
+@dataclass
+class RuntimeSelection:
+    champion: OverlayResolution
+    challengers: list[OverlayResolution]
+
+
 _ALLOWED_TOP_LEVEL_PATCH_KEYS = {"strategy_configs", "strategy_profiles", "selector", "sizing"}
 _ALLOWED_SELECTOR_KEYS = {"base_edge"}
 _ALLOWED_SIZING_KEYS = {"base_qty"}
@@ -174,6 +180,37 @@ class CandidateRuntimeOverlayManager:
             strategy_profiles=cfg.get("strategy_profiles", {}),
             strategy_configs=cfg.get("strategy_configs", {}),
         )
+
+    def resolve_runtime(self, symbol: str, regime: str, mode: str) -> RuntimeSelection:
+        baseline = OverlayResolution(
+            symbol=symbol,
+            regime=regime,
+            runtime_model="baseline",
+            candidate_id=None,
+            strategy_profiles=self.baseline_cfg.get("strategy_profiles", {}),
+            strategy_configs=self.baseline_cfg.get("strategy_configs", {}),
+        )
+        cids = self.symbol_to_candidates.get(symbol, [])
+        eligible = [self.active[cid] for cid in cids if not self.active[cid].get("blocked")]
+        if mode == "paper":
+            challengers: list[OverlayResolution] = []
+            for row in eligible:
+                if row.get("lane") != "paper_candidate":
+                    continue
+                cfg = row["overlay_config"]
+                challengers.append(
+                    OverlayResolution(
+                        symbol=symbol,
+                        regime=regime,
+                        runtime_model=f"challenger:{row['lane']}",
+                        candidate_id=row["id"],
+                        strategy_profiles=cfg.get("strategy_profiles", {}),
+                        strategy_configs=cfg.get("strategy_configs", {}),
+                    )
+                )
+            return RuntimeSelection(champion=baseline, challengers=challengers)
+
+        return RuntimeSelection(champion=self.resolve(symbol, regime), challengers=[])
 
     def status(self) -> dict:
         return {

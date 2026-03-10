@@ -99,6 +99,9 @@ Dette skriver ferdige filer til `runtime/llm_exports/`:
 - `failure_report.md`
 - `research_bundle.json`
 - `paste_to_llm.md`
+- `llm_response_template.md`
+
+Steg-for-steg manuell workflow er dokumentert i `docs/manual_llm_workflow.md`.
 
 ## Sikkerhetsnoter
 - Fail-closed: hvis datafeed/account-state er usikker pauser engine automatisk.

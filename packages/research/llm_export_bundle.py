@@ -239,6 +239,7 @@ class ResearchBundleExporter:
         )
 
     def _format_paste_to_llm(self, executive_summary: str, top_candidates_md: str, failure_report_md: str) -> str:
+        response_format = self._format_llm_response_template()
         return (
             "# Paste to LLM\n\n"
             "## Systeminstruksjon til LLM\n"
@@ -252,10 +253,61 @@ class ResearchBundleExporter:
             "## Failure patterns\n\n"
             f"{failure_report_md}\n\n"
             "## Oppgave til LLM\n"
-            "Foreslå 8 konkrete neste steg fordelt på: (1) nye idéer, (2) filters, (3) regime tweaks, (4) search-space tweaks."
-            " Hvert forslag må inneholde: hypotese, hvorfor edge kan eksistere, forventet regime, valideringsplan (backtest + OOS + paper), overfit-risiko, og tydelige stop-kriterier.\n\n"
+            "Foreslå 8 konkrete neste steg fordelt på: (1) config changes, (2) search-space changes, (3) regime/selector changes, (4) nye strategy ideas.\n"
+            "Skriv svaret ditt i nøyaktig formatet under. Ikke bruk andre toppnivå-felt.\n\n"
+            "## Påkrevd svarformat (kopier og fyll ut)\n\n"
+            f"{response_format}\n\n"
+            "## Kvalitetskrav for hvert forslag\n"
+            "- Vær konkret og kort. Unngå diffuse anbefalinger.\n"
+            "- Skill tydelig mellom forslag som er config-only, search-space-only, eller code-level.\n"
+            "- Hvis requires_code=true må du si nøyaktig hva som må implementeres.\n"
+            "- Hvis requires_code=false skal forslaget kunne testes uten nye Python-filer.\n"
+            "- Koble alltid forslag til validation-plan (backtest + OOS + paper) med fail-fast kriterier.\n\n"
             "## Viktig\n"
             "Unngå overfitting. Fokuser på små, verifiserbare endringer med høy forklarbarhet og klar fail-fast evaluering.\n"
+        )
+
+    def _format_llm_response_template(self) -> str:
+        return (
+            "```markdown\n"
+            "# LLM Research Response\n\n"
+            "## config_changes\n"
+            "- id: cfg_1\n"
+            "  summary: Kort beskrivelse av config-endring\n"
+            "  proposed_change: Konkret verdi/endring i YAML/JSON\n"
+            "  why_this_may_have_edge: Hvorfor dette kan bedre netto-edge\n"
+            "  how_to_validate: Backtest + OOS + paper plan med stop-kriterier\n"
+            "  requires_code: false\n\n"
+            "## search_space_changes\n"
+            "- id: ss_1\n"
+            "  summary: Kort beskrivelse av endring i research-space\n"
+            "  proposed_change: Hvilke grenser/parametre/symboler/regimer som endres\n"
+            "  why_this_may_have_edge: Hvorfor søkeområdet blir bedre\n"
+            "  how_to_validate: Hvordan måle at søkeområdet forbedres\n"
+            "  requires_code: false\n\n"
+            "## regime_or_selector_changes\n"
+            "- id: reg_1\n"
+            "  summary: Endring i regime- eller selector-logikk\n"
+            "  proposed_change: Konkret tweak (terskel, penalty, gating, osv.)\n"
+            "  why_this_may_have_edge: Hvorfor dette kan redusere dårlige valg\n"
+            "  how_to_validate: Evaluering mot feilvalg/edge decay\n"
+            "  requires_code: true\n\n"
+            "## new_strategy_ideas\n"
+            "- id: idea_1\n"
+            "  summary: Ny strategi-idé\n"
+            "  setup: Markedssituasjon + trigger + exit-idé\n"
+            "  why_this_may_have_edge: Hvorfor markedet kan være ineffisient her\n"
+            "  how_to_validate: Enkel valideringsplan før eventuell implementering\n"
+            "  requires_code: true\n\n"
+            "## requires_code\n"
+            "- config_changes: false\n"
+            "- search_space_changes: false\n"
+            "- regime_or_selector_changes: true\n"
+            "- new_strategy_ideas: true\n\n"
+            "## notes_for_codex\n"
+            "- Prioriter rekkefølge (1-3) for hva som bør gjøres først\n"
+            "- Merk eksplisitt hva som kan gjøres uten kode\n"
+            "```\n"
         )
 
     def build_bundle(self) -> tuple[dict, dict[str, str]]:
@@ -306,6 +358,7 @@ class ResearchBundleExporter:
             "failure_report.md": failure_report_md,
             "research_bundle.json": json.dumps(bundle, indent=2),
             "paste_to_llm.md": paste_to_llm_md,
+            "llm_response_template.md": self._format_llm_response_template(),
         }
 
     def export(self) -> dict[str, str]:

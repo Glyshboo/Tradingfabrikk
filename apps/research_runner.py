@@ -108,6 +108,9 @@ def main() -> None:
             summary = row.get("summary", "research-generated config candidate")
             metrics = {
                 "score": row["score"],
+                "plausible": row.get("plausible", False),
+                "rejection_reasons": row.get("rejection_reasons", []),
+                "evaluation": row.get("evaluation", {}),
                 "symbol": row["symbol"],
                 "regime": row["regime"],
                 "walk_forward": row.get("walk_forward"),
@@ -117,7 +120,7 @@ def main() -> None:
                 "schema_valid": True,
                 "config_valid": True,
                 "backtest_pass": bool(row.get("walk_forward")),
-                "oos_pass": bool((row.get("walk_forward") or {}).get("out_sample")),
+                "oos_pass": bool(row.get("plausible", False)),
                 "severe_risk_flags": False,
             }
             (candidate_dir / "summary.md").write_text(f"# {row['id']}\n\n{summary}\n", encoding="utf-8")
@@ -151,6 +154,9 @@ def main() -> None:
                 "oos_result": (row.get("walk_forward") or {}).get("out_sample"),
                 "config_patch": row.get("strategy_config_patch"),
                 "provider_used": row.get("provider", "research_optimizer"),
+                "evaluation": row.get("evaluation", {}),
+                "plausible": row.get("plausible", False),
+                "rejection_reasons": row.get("rejection_reasons", []),
                 "risk_notes": row.get("risk_notes", "standard guardrails applied"),
                 "validation_report": validation_report,
                 "artifact_bundle": str(candidate_dir),

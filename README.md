@@ -139,7 +139,7 @@ Windows launcher notes:
 - **Paper-smoke is now executable** via a lightweight worker that consumes `paper_smoke_running` candidates and transitions to `paper_smoke_pass` or `validation_failed` from actual short historical smoke results.
 - **`hold` and `keep_paper` now have behavior**: `hold` sets a temporary hold window before smoke evaluation; `keep_paper` keeps candidates in paper-smoke track without silent promotion.
 - **Backtesting is strategy-aware** for `TrendCore` and `RangeMR` using real candle OHLC simulation with walk-forward/OOS preserved.
-- **LLM output is normalized to structured schema** (`summary`, `diagnosis`, `proposed_actions`, `config_patch`, `search_space_patch`, `confidence`, `warnings`) across providers and fail-closed on weak/unavailable output.
+- **LLM output is normalized to strict edge-research schema** (`summary`, `diagnosis`, `edge_hypothesis`, `failure_mode_target`, `expected_market_regime`, `proposed_actions`, `config_patch`, `strategy_profile_patch`, `search_space_patch`, `validation_plan`, `risk_to_overfit`, `confidence`, `warnings`) across providers and fail-closed on weak/unavailable output.
 - **LLM budgets are enforced and persisted** (`max_calls_per_day`, `max_calls_per_week`) with usage history in `runtime/llm_budget.json`; budget status is included in artifacts/status.
 - **State rehydration finished for practical runtime history**: symbol profiles, llm review history, strategy performance history, and paper/live trade histories are persisted/restored.
 - **Optional conservative symbol scheduler** added (`scheduler.enabled`) with simple hot/cold ordering and disabled by default.

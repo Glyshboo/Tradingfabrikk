@@ -35,6 +35,10 @@ def test_export_bundle_with_status_and_registry(tmp_path):
                 "reason_counts": {"blocked_by_filter:range_quality_gate": 2, "entry_no_signal": 1},
                 "family_reason_counts": {"RangeMR": {"blocked_by_filter:range_quality_gate": 2}},
                 "family_quality": {"RangeMR": {"observed": 2, "setup_quality_sum": 0.7}},
+                "symbol_reason_counts": {"ETHUSDT": {"blocked_by_filter:range_quality_gate": 2}},
+                "reason_outcome_stats": {
+                    "blocked_by_filter:range_quality_gate": {"blocked": 2, "would_win": 0, "would_lose": 2}
+                },
             },
         },
     )
@@ -102,6 +106,8 @@ def test_export_bundle_with_status_and_registry(tmp_path):
     assert bundle["top_candidates"][0]["candidate_id"] == "cand_a"
     assert bundle["performance_memory_snapshot"]["total_cells"] == 1
     assert "family_filter_exit_attribution" in bundle
+    assert "family_profiles" in bundle
+    assert "quality_summaries" in bundle
     assert "no_trade_intelligence" in bundle
 
 
@@ -148,6 +154,8 @@ def test_research_bundle_json_has_stable_structure(tmp_path):
         "selector_summary",
         "top_failure_patterns",
         "family_filter_exit_attribution",
+        "family_profiles",
+        "quality_summaries",
         "no_trade_intelligence",
         "research_recommendations",
         "recent_research_rankings",
@@ -176,6 +184,8 @@ def test_paste_to_llm_contains_required_blocks(tmp_path):
     assert "Top candidates" in paste
     assert "Failure patterns" in paste
     assert "Family/filter/exit attribution snapshot" in paste
+    assert "Family profile snapshot" in paste
+    assert "Quality diagnostics snapshot" in paste
     assert "No-trade intelligence snapshot" in paste
     assert "Påkrevd svarformat" in paste
     assert "## config_changes" in paste

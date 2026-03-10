@@ -122,6 +122,22 @@ llm_research:
   openai_model: gpt-4o-mini
   anthropic_model: claude-3-5-sonnet-latest
 
+auto_research:
+  enabled: true
+  artifact_file: runtime/auto_research_last_report.json
+  triggers:
+    research_schedule_hours: 24
+    performance_drop_window_hours: 12
+    performance_drop_threshold: -120
+    min_performance_observations: 10
+    min_paper_trades_before_research: 8
+    regime_shift_trigger: true
+    challenger_failure_streak: 4
+    cooldown_hours: 6
+  llm:
+    enabled: false
+    run_after_deterministic: false
+
 bootstrap:
   strategy_idea_library_dir: strategy_ideas
   enabled: true

@@ -34,24 +34,26 @@ def _load_yaml_or_config(path: str) -> dict:
     return parsed
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--config", default="configs/active.yaml")
-    parser.add_argument("--space", default="configs/research_space.yaml")
-    parser.add_argument("--samples", type=int, default=15)
-    parser.add_argument("--symbols", default="")
-    parser.add_argument("--regimes", default="")
-    parser.add_argument("--start-ts", type=int, default=None)
-    parser.add_argument("--end-ts", type=int, default=None)
-    parser.add_argument("--strategy-families", default="")
-    args = parser.parse_args()
+def run_research(
+    *,
+    config_path: str,
+    space_path: str = "configs/research_space.yaml",
+    samples: int = 15,
+    symbols_arg: str = "",
+    regimes_arg: str = "",
+    start_ts: int | None = None,
+    end_ts: int | None = None,
+    strategy_families_arg: str = "",
+    trigger_source: str = "manual",
+    trigger_reasons: list[str] | None = None,
+    trigger_context: dict | None = None,
+) -> dict:
+    active_cfg = load_config(config_path)
+    space = _load_yaml_or_config(space_path)
 
-    active_cfg = load_config(args.config)
-    space = _load_yaml_or_config(args.space)
-
-    symbols = [s.strip() for s in args.symbols.split(",") if s.strip()] or space.get("symbols") or active_cfg["symbols"]
-    if args.regimes:
-        regimes = [r.strip() for r in args.regimes.split(",") if r.strip()]
+    symbols = [s.strip() for s in symbols_arg.split(",") if s.strip()] or space.get("symbols") or active_cfg["symbols"]
+    if regimes_arg:
+        regimes = [r.strip() for r in regimes_arg.split(",") if r.strip()]
     else:
         regimes = space.get("regimes") or sorted(
             {
@@ -61,14 +63,14 @@ def main() -> None:
             }
         )
     strategy_families = (
-        [x.strip() for x in args.strategy_families.split(",") if x.strip()]
+        [x.strip() for x in strategy_families_arg.split(",") if x.strip()]
         or space.get("strategy_families")
         or list(active_cfg.get("strategy_configs", {}).keys())
     )
     ideas_dir = (active_cfg.get("bootstrap") or {}).get("strategy_idea_library_dir", "strategy_ideas")
     ideas = StrategyIdeaLibrary(ideas_dir).report()
     implemented_idea_families = sorted({row.get("family") for row in ideas.get("implemented_plugins", []) if row.get("family")})
-    if not args.strategy_families and implemented_idea_families:
+    if not strategy_families_arg and implemented_idea_families:
         strategy_families = [fam for fam in strategy_families if fam in implemented_idea_families] or implemented_idea_families
 
     symbol_profiles = {
@@ -85,9 +87,9 @@ def main() -> None:
         symbols=symbols,
         regimes=regimes,
         strategy_families=strategy_families,
-        samples=args.samples,
-        start_ts=args.start_ts or space.get("start_ts"),
-        end_ts=args.end_ts or space.get("end_ts"),
+        samples=samples,
+        start_ts=start_ts or space.get("start_ts"),
+        end_ts=end_ts or space.get("end_ts"),
         symbol_profiles=symbol_profiles,
     )
     total_candidates = sum(len(rows) for rows in ranking.values())
@@ -136,6 +138,9 @@ def main() -> None:
                         "idea_library_id": row.get("idea_id"),
                         "idea_priority_hint": row.get("idea_priority_hint"),
                         "idea_strict_track_required": row.get("idea_strict_track_required", False),
+                        "trigger_source": trigger_source,
+                        "trigger_reasons": trigger_reasons or ["manual"],
+                        "trigger_context": trigger_context or {},
                     },
                     indent=2,
                 ),
@@ -162,6 +167,9 @@ def main() -> None:
                 "artifact_bundle": str(candidate_dir),
                 "idea_id": row.get("idea_id"),
                 "code_change": bool(row.get("code_change", False)),
+                "trigger_source": trigger_source,
+                "trigger_reasons": trigger_reasons or ["manual"],
+                "trigger_context": trigger_context or {},
             })
             registry.transition(row["id"], "config_generated")
             registry.transition(row["id"], "backtest_pass")
@@ -180,6 +188,9 @@ def main() -> None:
                 "config_patch": row.get("strategy_config_patch"),
                 "warnings": row.get("warnings", []),
                 "recommendation": row.get("recommendation", "manual_review"),
+                "trigger_source": trigger_source,
+                "trigger_reasons": trigger_reasons or ["manual"],
+                "trigger_context": trigger_context or {},
                 "created_ts": time.time(),
                 "artifacts": {
                     "summary": summary,
@@ -198,7 +209,32 @@ def main() -> None:
             "strategy_families": strategy_families,
         },
     }
-    print(json.dumps({"candidate_registry": registry.report(), "bootstrap": bootstrap}, indent=2))
+    summary = {"candidate_registry": registry.report(), "bootstrap": bootstrap, "generated_candidates": total_candidates}
+    print(json.dumps(summary, indent=2))
+    return summary
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--config", default="configs/active.yaml")
+    parser.add_argument("--space", default="configs/research_space.yaml")
+    parser.add_argument("--samples", type=int, default=15)
+    parser.add_argument("--symbols", default="")
+    parser.add_argument("--regimes", default="")
+    parser.add_argument("--start-ts", type=int, default=None)
+    parser.add_argument("--end-ts", type=int, default=None)
+    parser.add_argument("--strategy-families", default="")
+    args = parser.parse_args()
+    run_research(
+        config_path=args.config,
+        space_path=args.space,
+        samples=args.samples,
+        symbols_arg=args.symbols,
+        regimes_arg=args.regimes,
+        start_ts=args.start_ts,
+        end_ts=args.end_ts,
+        strategy_families_arg=args.strategy_families,
+    )
 
 
 if __name__ == "__main__":

@@ -55,7 +55,13 @@ class MasterEngine:
         self.risk = RiskEngine(cfg["risk"])
         self.regime = RegimeEngine()
         self.performance_memory = PerformanceMemory(cfg.get("selector", {}).get("performance_memory", {}))
-        self.selector = StrategySelector(cfg["selector"]["base_edge"], performance_memory=self.performance_memory)
+        selector_cfg = cfg.get("selector", {})
+        self.selector = StrategySelector(
+            selector_cfg["base_edge"],
+            performance_memory=self.performance_memory,
+            cold_start_bias=selector_cfg.get("family_cold_start_bias", {}),
+            cold_start_max_samples=float(selector_cfg.get("family_cold_start_max_samples", 6)),
+        )
         self.profile_mgr = SymbolProfileManager(interval_sec=cfg["engine"]["profile_update_sec"])
         self.audit = AuditStore(cfg["telemetry"]["audit_db"])
         self.account = AccountState(
@@ -251,7 +257,7 @@ class MasterEngine:
                             profile,
                         )
                         if shadow_decision:
-                            self._record_challenger_signal(challenger, shadow_decision, snap.ts or time.time(), snap.price)
+                            self._record_challenger_signal(challenger, shadow_decision, snap.ts or time.time(), snap.price, cost_proxy)
             self._persist_state()
             self._write_status(self.engine_state)
             self._maybe_refresh_exports_schedule()
@@ -424,8 +430,12 @@ class MasterEngine:
         decision.overlay_candidate_id = overlay.candidate_id or ""
         return decision
 
-    def _record_challenger_signal(self, challenger, decision: DecisionRecord, signal_ts: float, entry_basis: float) -> None:
+    def _record_challenger_signal(self, challenger, decision: DecisionRecord, signal_ts: float, entry_basis: float, cost_proxy: dict) -> None:
         qty = max(0.0, self.cfg["sizing"]["base_qty"] * float(decision.sizing.get("confidence", 0.0)))
+        challenger_cfg = self.paper_candidate_cfg or {}
+        fee_rate = float(challenger_cfg.get("fee_rate", 0.0006) or 0.0006)
+        slippage_multiplier = float(challenger_cfg.get("slippage_multiplier", 1.0) or 1.0)
+        funding_rate_8h = float(challenger_cfg.get("funding_rate_8h", 0.0001) or 0.0001)
         self.challenger_eval_history.append(
             {
                 "symbol": decision.symbol,
@@ -438,12 +448,33 @@ class MasterEngine:
                 "overlay_candidate_id": challenger.candidate_id or "",
                 "hypothetical_qty": qty,
                 "entry_basis": entry_basis,
+                "fee_rate": fee_rate,
+                "slippage_rate": max(0.0, float(cost_proxy.get("slippage", 0.0) or 0.0) * slippage_multiplier),
+                "funding_rate_8h": funding_rate_8h,
                 "window_sec": float(self.paper_candidate_cfg.get("compare_window_sec", self.paper_candidate_cfg.get("window_sec", 300)) or 300),
                 "status": "pending",
                 "result_pnl": None,
+                "result_cost_adjusted_pnl": None,
                 "result_ts": None,
             }
         )
+
+    def _challenger_window_extrema(self, symbol: str, signal_ts: float, fallback_price: float) -> tuple[float, float, int]:
+        candles = list(self.data.candles.get(symbol, {}).get("1h", []))
+        if not candles:
+            return fallback_price, fallback_price, 0
+        window_ms = signal_ts * 1000
+        highs = []
+        lows = []
+        for candle in candles:
+            close_time = float(candle.get("close_time", 0.0) or 0.0)
+            if close_time <= 0 or close_time < window_ms:
+                continue
+            highs.append(float(candle.get("high", fallback_price) or fallback_price))
+            lows.append(float(candle.get("low", fallback_price) or fallback_price))
+        if not highs or not lows:
+            return fallback_price, fallback_price, 0
+        return max(highs), min(lows), len(highs)
 
     def _evaluate_challenger_signals(self) -> int:
         if self.cfg.get("mode") != "paper":
@@ -463,15 +494,46 @@ class MasterEngine:
             entry = float(row.get("entry_basis") or 0.0)
             qty = float(row.get("hypothetical_qty") or 0.0)
             side = row.get("side")
+            max_price, min_price, window_candles = self._challenger_window_extrema(str(row.get("symbol") or ""), signal_ts, snap.price)
             if side == "BUY":
                 pnl = (snap.price - entry) * qty
+                mfe = max(0.0, (max_price - entry) * qty)
+                mae = max(0.0, (entry - min_price) * qty)
             else:
                 pnl = (entry - snap.price) * qty
+                mfe = max(0.0, (entry - min_price) * qty)
+                mae = max(0.0, (max_price - entry) * qty)
+
+            notional = abs(entry * qty)
+            fee_cost = notional * max(0.0, float(row.get("fee_rate") or 0.0))
+            slippage_cost = notional * max(0.0, float(row.get("slippage_rate") or 0.0))
+            funding_rate_8h = max(0.0, float(row.get("funding_rate_8h") or 0.0))
+            funding_cost = notional * funding_rate_8h * max(window_sec, 0.0) / (8 * 3600)
+            total_cost = fee_cost + slippage_cost + funding_cost
+            cost_adjusted_pnl = pnl - total_cost
+            move_quality = 0.0 if (mfe + mae) <= 1e-9 else max(0.0, min(1.0, (mfe - mae) / max(mfe + mae, 1e-9)))
+            entry_quality = 0.0 if (mfe + mae) <= 1e-9 else max(0.0, min(1.0, mfe / max(mfe + mae, 1e-9)))
+            exit_pack_quality = 0.0 if mfe <= 1e-9 else max(0.0, min(1.0, max(0.0, pnl) / mfe))
+
             row["status"] = "evaluated"
             row["result_pnl"] = pnl
+            row["result_cost_adjusted_pnl"] = cost_adjusted_pnl
             row["result_ts"] = now
+            row["mfe"] = mfe
+            row["mae"] = mae
+            row["move_quality"] = move_quality
+            row["entry_quality"] = entry_quality
+            row["exit_pack_quality"] = exit_pack_quality
+            row["cost_breakdown"] = {
+                "notional": round(notional, 8),
+                "fee_cost": round(fee_cost, 8),
+                "slippage_cost": round(slippage_cost, 8),
+                "funding_cost": round(funding_cost, 8),
+                "total_cost": round(total_cost, 8),
+            }
+            row["window_candles"] = window_candles
             baseline_scale = max(abs(entry * qty * 0.001), 1e-6)
-            challenger_relative = max(-1.0, min(1.0, pnl / baseline_scale))
+            challenger_relative = max(-1.0, min(1.0, cost_adjusted_pnl / baseline_scale))
             row["challenger_relative"] = challenger_relative
             evaluated += 1
             self.performance_memory.update(
@@ -479,7 +541,7 @@ class MasterEngine:
                 regime=str(row.get("regime") or ""),
                 strategy=str(row.get("strategy") or ""),
                 config=str(row.get("config") or ""),
-                pnl=pnl,
+                pnl=cost_adjusted_pnl,
                 source="challenger",
                 ts=now,
                 challenger_relative=challenger_relative,
@@ -564,8 +626,18 @@ class MasterEngine:
                 and now - float(x.get("result_ts", 0)) <= window_sec
             ]
             avg_pnl = (sum(float(x.get("result_pnl") or 0.0) for x in evaluations) / len(evaluations)) if evaluations else 0.0
+            avg_cost_adjusted_pnl = (
+                sum(float(x.get("result_cost_adjusted_pnl") or x.get("result_pnl") or 0.0) for x in evaluations) / len(evaluations)
+                if evaluations
+                else 0.0
+            )
+            avg_mfe = (sum(float(x.get("mfe") or 0.0) for x in evaluations) / len(evaluations)) if evaluations else 0.0
+            avg_mae = (sum(float(x.get("mae") or 0.0) for x in evaluations) / len(evaluations)) if evaluations else 0.0
+            avg_move_quality = (sum(float(x.get("move_quality") or 0.0) for x in evaluations) / len(evaluations)) if evaluations else 0.0
+            avg_entry_quality = (sum(float(x.get("entry_quality") or 0.0) for x in evaluations) / len(evaluations)) if evaluations else 0.0
+            avg_exit_pack_quality = (sum(float(x.get("exit_pack_quality") or 0.0) for x in evaluations) / len(evaluations)) if evaluations else 0.0
             negative_ratio = (
-                sum(1 for x in evaluations if float(x.get("result_pnl") or 0.0) < 0) / len(evaluations)
+                sum(1 for x in evaluations if float(x.get("result_cost_adjusted_pnl") or x.get("result_pnl") or 0.0) < 0) / len(evaluations)
                 if evaluations
                 else 1.0
             )
@@ -583,7 +655,13 @@ class MasterEngine:
                     "paper_challenger_result": {
                         "evaluated": len(evaluations),
                         "avg_pnl": avg_pnl,
+                        "avg_cost_adjusted_pnl": avg_cost_adjusted_pnl,
                         "negative_ratio": negative_ratio,
+                        "avg_mfe": avg_mfe,
+                        "avg_mae": avg_mae,
+                        "avg_move_quality": avg_move_quality,
+                        "avg_entry_quality": avg_entry_quality,
+                        "avg_exit_pack_quality": avg_exit_pack_quality,
                         "window_sec": window_sec,
                         "ts": now,
                     }
@@ -593,16 +671,16 @@ class MasterEngine:
                 self.candidate_registry.update_meta(cid, meta_patch={"lifecycle_reason": "paper:no_signal_density"})
                 self.candidate_registry.transition(cid, "paper_candidate_fail")
                 continue
-            if avg_pnl <= edge_decay_avg_pnl or negative_ratio > max_negative_ratio:
+            if avg_cost_adjusted_pnl <= edge_decay_avg_pnl or negative_ratio > max_negative_ratio:
                 self.candidate_registry.update_meta(cid, meta_patch={"lifecycle_reason": "paper:edge_decay"})
                 self.candidate_registry.transition(cid, "paper_candidate_fading")
                 self.candidate_registry.transition(cid, "edge_decay")
                 continue
-            if avg_pnl <= fade_avg_pnl:
+            if avg_cost_adjusted_pnl <= fade_avg_pnl:
                 self.candidate_registry.update_meta(cid, meta_patch={"lifecycle_reason": "paper:fading_momentum"})
                 self.candidate_registry.transition(cid, "paper_candidate_fading")
                 continue
-            if avg_pnl >= required_winning_avg_pnl:
+            if avg_cost_adjusted_pnl >= required_winning_avg_pnl:
                 self.candidate_registry.update_meta(cid, meta_patch={"lifecycle_reason": "paper:winning"})
                 self.candidate_registry.transition(cid, "paper_candidate_winning")
                 self.candidate_registry.transition(cid, "paper_candidate_pass")

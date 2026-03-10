@@ -25,6 +25,8 @@ class PerformanceMemory:
         self.max_adjustment = float(cfg.get("max_adjustment", 0.08))
         self.uncertainty_scale = float(cfg.get("uncertainty_scale", 0.02))
         self.max_uncertainty_penalty = float(cfg.get("max_uncertainty_penalty", 0.03))
+        self.cold_start_uncertainty_penalty = float(cfg.get("cold_start_uncertainty_penalty", 0.008))
+        self.prior_sample_strength = float(cfg.get("prior_sample_strength", 4.0))
         self.pnl_scale = float(cfg.get("pnl_scale", 1.0))
         self.weights = {
             "recent_pnl": float(cfg.get("weight_recent_pnl", 0.35)),
@@ -114,8 +116,9 @@ class PerformanceMemory:
         if not self.enabled or cell.sample_count <= 0:
             return {
                 "learned_adjustment": 0.0,
-                "uncertainty_penalty": 0.0,
+                "uncertainty_penalty": round(self.cold_start_uncertainty_penalty, 6),
                 "memory_sample_count": 0.0,
+                "memory_sample_weight": 0.0,
                 "memory_recent_pnl": 0.0,
                 "memory_hit_rate": 0.5,
                 "memory_avg_result": 0.0,
@@ -123,21 +126,23 @@ class PerformanceMemory:
             }
 
         sample_weight = min(1.0, math.sqrt(cell.sample_count / max(self.min_samples_for_full_weight, 1.0)))
+        evidence_weight = cell.sample_count / max(cell.sample_count + self.prior_sample_strength, 1e-9)
         raw = (
             self.weights["recent_pnl"] * cell.recent_pnl
             + self.weights["hit_rate"] * ((cell.hit_rate - 0.5) * 2.0)
             + self.weights["avg_result"] * cell.avg_result
             + self.weights["challenger_relative"] * cell.challenger_relative
         )
-        learned = max(-self.max_adjustment, min(self.max_adjustment, raw * self.max_adjustment * sample_weight))
+        learned = max(-self.max_adjustment, min(self.max_adjustment, raw * self.max_adjustment * sample_weight * evidence_weight))
         uncertainty = min(
             self.max_uncertainty_penalty,
-            self.uncertainty_scale * (1.0 - sample_weight) * (1.0 + abs(raw)),
+            self.cold_start_uncertainty_penalty + (self.uncertainty_scale * (1.0 - sample_weight) * (1.0 + abs(raw))),
         )
         return {
             "learned_adjustment": round(learned, 6),
             "uncertainty_penalty": round(uncertainty, 6),
             "memory_sample_count": round(cell.sample_count, 4),
+            "memory_sample_weight": round(sample_weight, 6),
             "memory_recent_pnl": round(cell.recent_pnl, 6),
             "memory_hit_rate": round(cell.hit_rate, 6),
             "memory_avg_result": round(cell.avg_result, 6),

@@ -27,6 +27,7 @@ def _cfg(tmp_path):
         "strategy_profiles": {},
         "strategy_configs": {"TrendCore": {}, "RangeMR": {}},
         "state": {"engine_state_file": str(tmp_path / "engine_state.json"), "data_state_file": str(tmp_path / "data_state.json")},
+        "paper_candidate": {"fee_rate": 0.001, "slippage_multiplier": 1.0, "funding_rate_8h": 0.0, "window_sec": 1},
     }
 
 
@@ -79,3 +80,36 @@ def test_engine_persists_performance_memory_state(tmp_path):
     reloaded = MasterEngine(cfg, PaperExecutionAdapter())
     comp = reloaded.performance_memory.score_components("BTCUSDT", "RANGE", "RangeMR", "c1", ts=100)
     assert comp["memory_sample_count"] > 0
+
+
+def test_challenger_evaluation_tracks_cost_adjusted_and_excursions(tmp_path):
+    engine = MasterEngine(_cfg(tmp_path), PaperExecutionAdapter())
+    engine.data.market["BTCUSDT"] = MarketSnapshot(symbol="BTCUSDT", price=103, bid=102.5, ask=103.5, ts=2000)
+    engine.data.candles["BTCUSDT"]["1h"].append({"close_time": 1500 * 1000, "high": 106, "low": 98})
+    engine.challenger_eval_history = [
+        {
+            "symbol": "BTCUSDT",
+            "regime": "TREND_UP",
+            "strategy": "BreakoutRetest",
+            "config": "default",
+            "side": "BUY",
+            "signal_ts": 1000,
+            "window_sec": 10,
+            "hypothetical_qty": 1.0,
+            "entry_basis": 100.0,
+            "fee_rate": 0.001,
+            "slippage_rate": 0.001,
+            "funding_rate_8h": 0.0,
+            "status": "pending",
+        }
+    ]
+
+    evaluated = engine._evaluate_challenger_signals()
+
+    assert evaluated == 1
+    row = engine.challenger_eval_history[0]
+    assert row["mfe"] == 6.0
+    assert row["mae"] == 2.0
+    assert row["result_cost_adjusted_pnl"] < row["result_pnl"]
+    assert row["move_quality"] > 0
+    assert row["entry_quality"] > 0

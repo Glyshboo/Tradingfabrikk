@@ -141,3 +141,15 @@ auto_research:
 bootstrap:
   strategy_idea_library_dir: strategy_ideas
   enabled: true
+
+exports:
+  enabled: true
+  output_dir: runtime/llm_exports
+  state_file: runtime/llm_exports/refresh_state.json
+  refresh_on_research: true
+  refresh_on_auto_research: true
+  refresh_on_candidate_change: true
+  refresh_on_challenger_eval: true
+  refresh_on_schedule: true
+  min_refresh_interval_sec: 900
+  schedule_interval_sec: 1800

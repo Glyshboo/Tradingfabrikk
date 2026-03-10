@@ -9,9 +9,17 @@ from packages.selector.performance_memory import PerformanceMemory
 
 
 class StrategySelector:
-    def __init__(self, base_edge: Dict[str, float], performance_memory: PerformanceMemory | None = None):
+    def __init__(
+        self,
+        base_edge: Dict[str, float],
+        performance_memory: PerformanceMemory | None = None,
+        cold_start_bias: Dict[str, float] | None = None,
+        cold_start_max_samples: float = 6.0,
+    ):
         self.base_edge = base_edge
         self.performance_memory = performance_memory
+        self.cold_start_bias = cold_start_bias or {}
+        self.cold_start_max_samples = max(float(cold_start_max_samples), 1.0)
 
     def select(
         self,
@@ -28,7 +36,9 @@ class StrategySelector:
         scores = {}
         components: Dict[str, Dict[str, float]] = {}
         for strategy_name, cfg_name, signal in candidates:
-            base = self.base_edge.get(strategy_name, 0.0) + signal.confidence
+            static_base_edge = float(self.base_edge.get(strategy_name, 0.0))
+            signal_confidence = float(signal.confidence)
+            base = static_base_edge + signal_confidence
             spread_cost = cost_proxy.get("spread", 0.0)
             slippage_cost = cost_proxy.get("slippage", 0.0)
             funding_cost = cost_proxy.get("funding", 0.0)
@@ -48,6 +58,7 @@ class StrategySelector:
                 "learned_adjustment": 0.0,
                 "uncertainty_penalty": 0.0,
                 "memory_sample_count": 0.0,
+                "memory_sample_weight": 0.0,
                 "memory_recent_pnl": 0.0,
                 "memory_hit_rate": 0.5,
                 "memory_avg_result": 0.0,
@@ -55,9 +66,15 @@ class StrategySelector:
             }
             if self.performance_memory:
                 memory = self.performance_memory.score_components(symbol, regime.value, strategy_name, cfg_name)
+            cold_start_component = 0.0
+            if strategy_name in self.cold_start_bias:
+                sample_count = float(memory.get("memory_sample_count", 0.0) or 0.0)
+                cold_weight = max(0.0, 1.0 - (sample_count / self.cold_start_max_samples))
+                cold_start_component = float(self.cold_start_bias.get(strategy_name, 0.0)) * cold_weight
             total = (
                 base
                 + memory["learned_adjustment"]
+                + cold_start_component
                 - memory["uncertainty_penalty"]
                 - spread_cost
                 - slippage_cost
@@ -69,8 +86,11 @@ class StrategySelector:
             key = f"{strategy_name}:{cfg_name}"
             scores[key] = round(total, 6)
             components[key] = {
+                "static_base_edge": round(static_base_edge, 6),
+                "signal_confidence": round(signal_confidence, 6),
                 "base": round(base, 6),
                 "learned_adjustment": memory["learned_adjustment"],
+                "family_cold_start_adjustment": round(cold_start_component, 6),
                 "uncertainty_penalty": memory["uncertainty_penalty"],
                 "spread_cost": round(spread_cost, 6),
                 "slippage_cost": round(slippage_cost, 6),
@@ -79,6 +99,7 @@ class StrategySelector:
                 "correlation_penalty": round(corr_penalty, 6),
                 "profile_penalty": round(profile_penalty, 6),
                 "memory_sample_count": memory["memory_sample_count"],
+                "memory_sample_weight": memory["memory_sample_weight"],
                 "memory_recent_pnl": memory["memory_recent_pnl"],
                 "memory_hit_rate": memory["memory_hit_rate"],
                 "memory_avg_result": memory["memory_avg_result"],

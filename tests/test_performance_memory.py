@@ -29,3 +29,13 @@ def test_challenger_updates_relative_component():
     comp = mem.score_components("ETHUSDT", "RANGE", "RangeMR", "c2", ts=50)
 
     assert comp["memory_challenger_relative"] > 0
+
+
+def test_cold_start_has_small_uncertainty_penalty_without_samples():
+    mem = PerformanceMemory({"cold_start_uncertainty_penalty": 0.009})
+
+    comp = mem.score_components("BTCUSDT", "TREND_UP", "TrendPullback", "c1", ts=10)
+
+    assert comp["memory_sample_count"] == 0.0
+    assert comp["learned_adjustment"] == 0.0
+    assert comp["uncertainty_penalty"] == 0.009

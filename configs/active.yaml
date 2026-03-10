@@ -55,6 +55,17 @@ selector:
   base_edge:
     TrendCore: 0.08
     RangeMR: 0.05
+    BreakoutRetest: 0.035
+    TrendPullback: 0.03
+    FailedBreakoutFade: 0.025
+  family_cold_start_bias:
+    BreakoutRetest: 0.008
+    TrendPullback: 0.007
+    FailedBreakoutFade: 0.006
+  family_cold_start_max_samples: 8
+  performance_memory:
+    cold_start_uncertainty_penalty: 0.008
+    prior_sample_strength: 4
 
 strategy_configs:
   TrendCore:

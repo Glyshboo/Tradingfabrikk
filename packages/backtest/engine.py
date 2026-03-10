@@ -187,17 +187,24 @@ class CandleBacktester:
         gross_pnl = 0.0
         total_cost = 0.0
         trades = 0
-        prev_pos = 0
         turnover = 0.0
         equity = 0.0
         peak_equity = 0.0
         max_drawdown = 0.0
         costs_bps = (fee_bps + slippage_bps + funding_bps_per_bar) / 10000
+
+        position = 0.0
+        signal_meta: dict = {}
+        bars_open = 0
+        peak_price = 0.0
+        partial_taken = False
+
         for i in range(2, len(candles)):
-            position = self._signal_for_bar(strategy_family, candles, i - 1, strategy_config)
-            close_now = candles[i]["close"]
-            close_prev = candles[i - 1]["close"]
+            snap_prev = self._snapshot_for_bar(candles, i - 1, strategy_config=strategy_config)
+            close_now = float(candles[i]["close"])
+            close_prev = float(candles[i - 1]["close"])
             ret = 0.0 if close_prev <= 0 else (close_now - close_prev) / close_prev
+
             if position != 0:
                 gross_leg = position * ret * close_now
                 cost_leg = close_now * costs_bps
@@ -206,18 +213,89 @@ class CandleBacktester:
                 pnl += gross_leg - cost_leg
                 trades += 1
                 turnover += abs(position) * close_now
-            if prev_pos != 0 and position != prev_pos:
-                flip_cost = close_now * costs_bps
-                total_cost += flip_cost
-                pnl -= flip_cost
-                turnover += abs(prev_pos - position) * close_now
-            prev_pos = position
+                bars_open += 1
+                if position > 0:
+                    peak_price = max(peak_price, close_now)
+                else:
+                    peak_price = min(peak_price, close_now)
+
+                stop_price = signal_meta.get("stop_price")
+                take_profit = signal_meta.get("take_profit")
+                partial_take = signal_meta.get("partial_take_profit")
+                exit_pack = signal_meta.get("exit_pack", "passthrough")
+                trail_mult = float(signal_meta.get("trail_mult", 0.0) or 0.0)
+                time_stop_bars = int(signal_meta.get("time_stop_bars", 0) or 0)
+                atr = snap_prev.atr or 0.0
+
+                should_close = False
+                if position > 0:
+                    if stop_price is not None and close_now <= float(stop_price):
+                        should_close = True
+                    elif take_profit is not None and close_now >= float(take_profit):
+                        should_close = True
+                    elif partial_take is not None and (not partial_taken) and close_now >= float(partial_take):
+                        partial_taken = True
+                        fraction = float(signal_meta.get("partial_fraction", 0.5))
+                        fraction = max(0.0, min(1.0, fraction))
+                        position = position * (1.0 - fraction)
+                    elif atr > 0 and trail_mult > 0 and exit_pack in {"atr_trail", "partial_tp_runner"}:
+                        trail = peak_price - atr * trail_mult
+                        if trail > 0 and close_now <= trail:
+                            should_close = True
+                else:
+                    if stop_price is not None and close_now >= float(stop_price):
+                        should_close = True
+                    elif take_profit is not None and close_now <= float(take_profit):
+                        should_close = True
+                    elif partial_take is not None and (not partial_taken) and close_now <= float(partial_take):
+                        partial_taken = True
+                        fraction = float(signal_meta.get("partial_fraction", 0.5))
+                        fraction = max(0.0, min(1.0, fraction))
+                        position = position * (1.0 - fraction)
+                    elif atr > 0 and trail_mult > 0 and exit_pack in {"atr_trail", "partial_tp_runner"}:
+                        trail = peak_price + atr * trail_mult
+                        if trail > 0 and close_now >= trail:
+                            should_close = True
+
+                if time_stop_bars > 0 and bars_open >= time_stop_bars:
+                    should_close = True
+
+                if should_close:
+                    position = 0.0
+                    signal_meta = {}
+                    bars_open = 0
+                    peak_price = 0.0
+                    partial_taken = False
+
+            if position == 0:
+                regime = self.regime_engine.classify(snap_prev)
+                signal = self.strategy_evaluator.evaluate(
+                    strategy_family,
+                    StrategyContext(snapshot=snap_prev, regime=regime, config=strategy_config or {}),
+                )
+                if signal:
+                    position = 1.0 if signal.side == "BUY" else -1.0 if signal.side == "SELL" else 0.0
+                    if position != 0:
+                        signal_meta = {
+                            "stop_price": signal.stop_price,
+                            "take_profit": signal.take_profit,
+                            "time_stop_bars": signal.meta.get("time_stop_bars", 0),
+                            "trail_mult": signal.meta.get("trail_mult", 0.0),
+                            "exit_pack": signal.meta.get("exit_pack", "passthrough"),
+                            "partial_take_profit": signal.meta.get("partial_take_profit"),
+                            "partial_fraction": signal.meta.get("partial_fraction", 0.0),
+                        }
+                        bars_open = 0
+                        peak_price = close_now
+                        partial_taken = False
+
             equity = pnl
             if equity > peak_equity:
                 peak_equity = equity
             drawdown = peak_equity - equity
             if drawdown > max_drawdown:
                 max_drawdown = drawdown
+
         sharpe_like = pnl / max(1.0, trades**0.5)
         return BacktestResult(
             trades=trades,

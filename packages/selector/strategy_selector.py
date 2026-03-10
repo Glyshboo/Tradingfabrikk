@@ -105,5 +105,8 @@ class StrategySelector:
                 "take_profit": sig.take_profit,
                 "time_stop_bars": sig.meta.get("time_stop_bars", 0),
                 "trail_mult": sig.meta.get("trail_mult", 1.5),
+                "exit_pack": sig.meta.get("exit_pack", "passthrough"),
+                "partial_take_profit": sig.meta.get("partial_take_profit"),
+                "partial_fraction": sig.meta.get("partial_fraction", 0.0),
             },
         )

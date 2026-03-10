@@ -14,7 +14,7 @@ def test_random_search_creates_candidates_per_symbol(tmp_path, monkeypatch):
         "bars": 60,
     }
 
-    synthetic_rows = [[i, "1", "2", "0.5", str(100 + i)] for i in range(80)]
+    synthetic_rows = [[i, str(100 + i - 0.3), str(100 + i + 0.8), str(100 + i - 0.8), str(100 + i)] for i in range(80)]
     from packages.data.data_manager import DataManager
 
     monkeypatch.setattr(DataManager, "_download_klines", lambda *args, **kwargs: synthetic_rows)
@@ -42,7 +42,7 @@ def test_random_search_score_changes_with_cost_model(tmp_path, monkeypatch):
         "bars": 80,
     }
 
-    synthetic_rows = [[i, "1", "2", "0.5", str(100 + i)] for i in range(120)]
+    synthetic_rows = [[i, str(100 + i - 0.3), str(100 + i + 0.8), str(100 + i - 0.8), str(100 + i)] for i in range(120)]
     from packages.data.data_manager import DataManager
 
     monkeypatch.setattr(DataManager, "_download_klines", lambda *args, **kwargs: synthetic_rows)
@@ -54,6 +54,7 @@ def test_random_search_score_changes_with_cost_model(tmp_path, monkeypatch):
         regimes=["RANGE"],
         strategy_families=["TrendCore"],
         samples=1,
+        start_ts=123,
         symbol_profiles={"BTCUSDT": SymbolProfile(liquidity_signature=1.0, slippage_proxy=0.0)},
     )
 
@@ -64,6 +65,7 @@ def test_random_search_score_changes_with_cost_model(tmp_path, monkeypatch):
         regimes=["RANGE"],
         strategy_families=["TrendCore"],
         samples=1,
+        start_ts=123,
         symbol_profiles={"BTCUSDT": SymbolProfile(liquidity_signature=0.1, slippage_proxy=0.0012)},
     )
 

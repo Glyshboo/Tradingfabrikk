@@ -37,6 +37,12 @@ def _cfg(tmp_path, mode: str = "paper"):
         },
         "micro_live": {"enabled": True, "risk_multiplier": 0.3, "max_total_exposure_notional": 100000, "max_symbols": 1},
         "paper_candidate": {"window_sec": 1, "compare_window_sec": 1, "min_trades": 1},
+        "incubation": {
+            "strict_candidate_kinds": ["combination_candidate", "new_family_candidate"],
+            "strict_revalidation_min_avg_pnl": 0.01,
+            "strict_revalidation_min_evaluations": 2,
+            "strict_challenger_hold_sec": 0,
+        },
     }
 
 
@@ -209,3 +215,15 @@ def test_live_mode_overlay_resolution_still_conservative(tmp_path):
     assert runtime.champion.runtime_model == "challenger:micro_live"
     assert runtime.champion.candidate_id == "cand_micro"
     assert runtime.challengers == []
+
+
+def test_strict_candidate_requires_revalidation_before_review(tmp_path):
+    engine = MasterEngine(_cfg(tmp_path), PaperExecutionAdapter())
+    engine.candidate_registry.register("cand_strict", 1.0, {"symbols": ["BTCUSDT"], "candidate_kind": "new_family_candidate", "track": "strict"})
+    engine.candidate_registry.transition("cand_strict", "paper_candidate_pass")
+    engine._auto_progress_paper_lifecycle()
+    assert engine.candidate_registry.get("cand_strict")["state"] == "needs_revalidation"
+
+    engine.candidate_registry.update_meta("cand_strict", artifacts_patch={"paper_challenger_result": {"avg_pnl": 0.03, "evaluated": 2}})
+    engine._auto_progress_paper_lifecycle()
+    assert engine.candidate_registry.get("cand_strict")["state"] == "ready_for_review"

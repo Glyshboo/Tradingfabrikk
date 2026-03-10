@@ -36,13 +36,15 @@ class PaperSmokeWorker:
             passed = False
             result = {"status": "insufficient_data", "ts": time.time(), "trades": 0, "pnl": 0.0, "sharpe_like": 0.0}
             if len(candles) >= 8:
+                kind = row.get("candidate_kind") or row.get("meta", {}).get("candidate_kind", "config_tweak")
+                profile = self.cfg.get("paper_smoke_profiles", {}).get(kind, {})
                 bt_result = self.bt.run(
                     candles,
                     strategy_family=strategy,
                     strategy_config=(row.get("artifacts", {}).get("config_patch") or {}).get(strategy, {}),
                 )
-                min_trades = int(self.cfg.get("paper_smoke", {}).get("min_trades", 4))
-                min_pnl = float(self.cfg.get("paper_smoke", {}).get("min_pnl", -1.0))
+                min_trades = int(profile.get("min_trades", self.cfg.get("paper_smoke", {}).get("min_trades", 4)))
+                min_pnl = float(profile.get("min_pnl", self.cfg.get("paper_smoke", {}).get("min_pnl", -1.0)))
                 passed = bt_result.trades >= min_trades and bt_result.pnl >= min_pnl
                 result = {
                     "status": "pass" if passed else "fail",
@@ -50,6 +52,9 @@ class PaperSmokeWorker:
                     "trades": bt_result.trades,
                     "pnl": bt_result.pnl,
                     "sharpe_like": bt_result.sharpe_like,
+                    "required_min_trades": min_trades,
+                    "required_min_pnl": min_pnl,
+                    "candidate_kind": kind,
                 }
             self.registry.update_meta(
                 row["id"],

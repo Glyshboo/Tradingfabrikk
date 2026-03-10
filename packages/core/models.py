@@ -53,6 +53,13 @@ class StrategySignal:
 
 
 @dataclass
+class StrategyContext:
+    snapshot: MarketSnapshot
+    regime: Regime
+    config: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
 class OrderRequest:
     symbol: str
     side: str

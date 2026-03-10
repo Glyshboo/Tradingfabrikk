@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from statistics import mean
 from typing import List
+
+from packages.core.models import MarketSnapshot, Regime, StrategyContext
+from packages.selector.regime_engine import RegimeEngine
+from packages.strategies.range_mr import RangeMR
+from packages.strategies.trend_core import TrendCore
 
 
 @dataclass
@@ -13,6 +17,13 @@ class BacktestResult:
 
 
 class CandleBacktester:
+    def __init__(self) -> None:
+        self.regime_engine = RegimeEngine()
+        self.strategies = {
+            "TrendCore": TrendCore(),
+            "RangeMR": RangeMR(),
+        }
+
     def _as_candles(self, candles_or_prices: List[dict] | List[float]) -> list[dict]:
         if not candles_or_prices:
             return []
@@ -32,29 +43,73 @@ class CandleBacktester:
         prices = [float(x) for x in candles_or_prices]
         return [{"open": px, "high": px, "low": px, "close": px} for px in prices]
 
-    def _position_for_bar(self, strategy_family: str, candles: list[dict], i: int, config: dict | None = None) -> int:
-        cfg = config or {}
-        if i < 2:
+    def _compute_atr(self, candles: list[dict], i: int, period: int = 14) -> float | None:
+        if i < period:
+            return None
+        true_ranges: list[float] = []
+        for bar_idx in range(max(1, i - period + 1), i + 1):
+            curr = candles[bar_idx]
+            prev_close = float(candles[bar_idx - 1]["close"])
+            high = float(curr["high"])
+            low = float(curr["low"])
+            tr = max(high - low, abs(high - prev_close), abs(low - prev_close))
+            true_ranges.append(tr)
+        if len(true_ranges) < period:
+            return None
+        return sum(true_ranges[-period:]) / period
+
+    def _compute_rsi(self, candles: list[dict], i: int, period: int = 14) -> float | None:
+        if i < period:
+            return None
+        closes = [float(c["close"]) for c in candles[i - period : i + 1]]
+        gains: list[float] = []
+        losses: list[float] = []
+        for idx in range(1, len(closes)):
+            diff = closes[idx] - closes[idx - 1]
+            gains.append(max(0.0, diff))
+            losses.append(max(0.0, -diff))
+        avg_gain = sum(gains) / period
+        avg_loss = sum(losses) / period
+        if avg_loss <= 1e-12:
+            return 100.0
+        rs = avg_gain / avg_loss
+        return 100 - (100 / (1 + rs))
+
+    def _snapshot_for_bar(self, candles: list[dict], i: int) -> MarketSnapshot:
+        close = float(candles[i]["close"])
+        # Backtest bruker candle-close syntetisk spread=0 for deterministisk signalparitet.
+        return MarketSnapshot(
+            symbol="BACKTEST",
+            price=close,
+            bid=close,
+            ask=close,
+            candle_close=float(candles[i - 1]["close"]) if i > 0 else close,
+            atr=self._compute_atr(candles, i),
+            rsi=self._compute_rsi(candles, i),
+            ts=float(i),
+        )
+
+    def _signal_for_bar(self, strategy_family: str, candles: list[dict], i: int, strategy_config: dict | None = None) -> int:
+        snapshot = self._snapshot_for_bar(candles, i)
+        regime = self.regime_engine.classify(snapshot)
+        return self.signal_for_snapshot(strategy_family, snapshot, regime, strategy_config)
+
+    def signal_for_snapshot(
+        self,
+        strategy_family: str,
+        snapshot: MarketSnapshot,
+        regime: Regime,
+        strategy_config: dict | None = None,
+    ) -> int:
+        strategy = self.strategies.get(strategy_family)
+        if strategy is None:
             return 0
-        close = candles[i]["close"]
-        prev = candles[i - 1]["close"]
-        prev2 = candles[i - 2]["close"]
-        if strategy_family == "RangeMR":
-            lookback = int(cfg.get("lookback", 8))
-            if i < lookback:
-                return 0
-            window = [c["close"] for c in candles[i - lookback:i]]
-            center = mean(window)
-            span = max(max(window) - min(window), max(abs(center), 1e-9) * 0.002)
-            z = (close - center) / span
-            threshold = float(cfg.get("mean_revert_threshold", 0.28))
-            if z > threshold:
-                return -1
-            if z < -threshold:
-                return 1
+        signal = strategy.generate_for_context(
+            StrategyContext(snapshot=snapshot, regime=regime, config=strategy_config or {})
+        )
+        if not signal:
             return 0
-        momentum = (close - prev) + (prev - prev2)
-        return 1 if momentum > 0 else -1 if momentum < 0 else 0
+        return 1 if signal.side == "BUY" else -1 if signal.side == "SELL" else 0
 
     def run(
         self,
@@ -73,7 +128,7 @@ class CandleBacktester:
         prev_pos = 0
         costs_bps = (fee_bps + slippage_bps + funding_bps_per_bar) / 10000
         for i in range(2, len(candles)):
-            position = self._position_for_bar(strategy_family, candles, i - 1, strategy_config)
+            position = self._signal_for_bar(strategy_family, candles, i - 1, strategy_config)
             close_now = candles[i]["close"]
             close_prev = candles[i - 1]["close"]
             ret = 0.0 if close_prev <= 0 else (close_now - close_prev) / close_prev

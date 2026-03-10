@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from packages.core.models import MarketSnapshot, Regime, StrategySignal
+from packages.core.models import MarketSnapshot, Regime, StrategyContext, StrategySignal
 from packages.strategies.base import StrategyPlugin
 
 
@@ -8,7 +8,10 @@ class TrendCore(StrategyPlugin):
     name = "TrendCore"
     eligible_regimes = {Regime.TREND_UP, Regime.TREND_DOWN}
 
-    def generate(self, snapshot: MarketSnapshot, regime: Regime, config: dict) -> StrategySignal | None:
+    def generate_for_context(self, context: StrategyContext) -> StrategySignal | None:
+        snapshot = context.snapshot
+        regime = context.regime
+        config = context.config
         if regime not in self.eligible_regimes or snapshot.atr is None:
             return None
         atr_mult = float(config.get("atr_stop_mult", 2.0))
@@ -23,3 +26,6 @@ class TrendCore(StrategyPlugin):
             reason=f"trend_regime_{regime.value}",
             meta={"time_stop_bars": config.get("time_stop_bars", 12)},
         )
+
+    def generate(self, snapshot: MarketSnapshot, regime: Regime, config: dict) -> StrategySignal | None:
+        return self.generate_for_context(StrategyContext(snapshot=snapshot, regime=regime, config=config))

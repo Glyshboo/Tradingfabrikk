@@ -6,7 +6,7 @@ import pathlib
 import time
 
 from packages.core.candidate_runtime import CandidateRuntimeOverlayManager
-from packages.core.models import AccountState, DecisionRecord, PositionState
+from packages.core.models import AccountState, DecisionRecord, PositionState, StrategyContext
 from packages.core.state_store import EngineStateStore
 from packages.data.data_manager import DataManager
 from packages.execution.adapters import BinanceRequestError, ExecutionAdapter, format_order
@@ -194,7 +194,7 @@ class MasterEngine:
                     if not isinstance(cfg_row, dict):
                         continue
                     strat = self.strategies[strat_name]
-                    signal = strat.generate(snap, regime, cfg_row)
+                    signal = strat.generate_for_context(StrategyContext(snapshot=snap, regime=regime, config=cfg_row))
                     if signal:
                         candidates.append((strat_name, config_name, signal))
                 cost_proxy = {

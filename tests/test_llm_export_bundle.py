@@ -1,0 +1,165 @@
+from __future__ import annotations
+
+import json
+
+from packages.research.llm_export_bundle import ResearchBundleExporter
+
+
+def _write_json(path, payload):
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+
+def test_export_bundle_with_status_and_registry(tmp_path):
+    status = tmp_path / "status.json"
+    registry = tmp_path / "registry.json"
+    engine_state = tmp_path / "engine_state.json"
+    review_queue = tmp_path / "review_queue.json"
+    out_dir = tmp_path / "llm_exports"
+
+    _write_json(
+        status,
+        {
+            "mode": "paper",
+            "state": "running",
+            "safe_pause": False,
+            "reduce_only": False,
+            "current_regime": {"BTCUSDT": "TREND_UP"},
+            "last_decision": {"blocked_reason": None, "score_components": {"base_edge": 0.1}},
+            "paper_candidate": {
+                "challenger_evaluations": [
+                    {"candidate_id": "cand_b", "challenger_pnl": -1.2, "symbol": "ETHUSDT", "regime": "RANGE"}
+                ]
+            },
+        },
+    )
+    _write_json(
+        registry,
+        {
+            "candidates": {
+                "cand_a": {
+                    "state": "paper_candidate_active",
+                    "score": 0.81,
+                    "strategy_family": "TrendCore",
+                    "symbols": ["BTCUSDT"],
+                    "regimes": ["TREND_UP"],
+                    "meta": {"plausible": True, "recommendation": "keep_paper"},
+                    "artifacts": {"oos_result": {"pnl": 12.4, "sharpe_like": 1.4}},
+                    "updated_ts": 100,
+                },
+                "cand_b": {
+                    "state": "validation_failed",
+                    "score": 0.2,
+                    "strategy_family": "RangeMR",
+                    "symbols": ["ETHUSDT"],
+                    "regimes": ["RANGE"],
+                    "meta": {"plausible": False, "rejection_reasons": ["weak_or_negative_out_sample_pnl"]},
+                    "artifacts": {"oos_result": {"pnl": -2.1, "sharpe_like": -0.4}},
+                    "updated_ts": 90,
+                },
+            }
+        },
+    )
+    _write_json(
+        engine_state,
+        {
+            "performance_memory_state": {
+                "BTCUSDT|TREND_UP|TrendCore|tc_safe": {
+                    "sample_count": 14,
+                    "recent_pnl": 0.24,
+                    "hit_rate": 0.62,
+                    "avg_result": 0.2,
+                    "challenger_relative": 0.1,
+                }
+            }
+        },
+    )
+    _write_json(review_queue, {"queue": [], "history": []})
+
+    exporter = ResearchBundleExporter(
+        status_file=str(status),
+        registry_file=str(registry),
+        engine_state_file=str(engine_state),
+        review_queue_file=str(review_queue),
+        output_dir=str(out_dir),
+    )
+
+    report = exporter.export()
+
+    assert report["output_dir"] == str(out_dir)
+    assert (out_dir / "executive_summary.md").exists()
+    assert (out_dir / "top_candidates.md").exists()
+    assert (out_dir / "failure_report.md").exists()
+    bundle = json.loads((out_dir / "research_bundle.json").read_text(encoding="utf-8"))
+    assert bundle["mode_status_summary"]["mode"] == "paper"
+    assert bundle["top_candidates"][0]["candidate_id"] == "cand_a"
+    assert bundle["performance_memory_snapshot"]["total_cells"] == 1
+
+
+def test_export_bundle_handles_missing_inputs_fail_soft(tmp_path):
+    out_dir = tmp_path / "llm_exports"
+    exporter = ResearchBundleExporter(
+        status_file=str(tmp_path / "missing_status.json"),
+        registry_file=str(tmp_path / "missing_registry.json"),
+        engine_state_file=str(tmp_path / "missing_engine_state.json"),
+        review_queue_file=str(tmp_path / "missing_review_queue.json"),
+        output_dir=str(out_dir),
+    )
+
+    report = exporter.export()
+    bundle = json.loads((out_dir / "research_bundle.json").read_text(encoding="utf-8"))
+
+    assert report["top_candidates"] == 0
+    assert bundle["mode_status_summary"]["mode"] == "not available"
+    assert len(bundle["important_sources"]) == 5
+
+
+def test_research_bundle_json_has_stable_structure(tmp_path):
+    registry = tmp_path / "registry.json"
+    _write_json(registry, {"candidates": {}})
+
+    exporter = ResearchBundleExporter(
+        registry_file=str(registry),
+        status_file=str(tmp_path / "status.json"),
+        engine_state_file=str(tmp_path / "engine_state.json"),
+        review_queue_file=str(tmp_path / "review.json"),
+        output_dir=str(tmp_path / "llm_exports"),
+    )
+    exporter.export()
+
+    bundle = json.loads((tmp_path / "llm_exports" / "research_bundle.json").read_text(encoding="utf-8"))
+    expected_keys = {
+        "generated_ts",
+        "mode_status_summary",
+        "current_regime_summary",
+        "top_candidates",
+        "candidate_state_counts",
+        "recent_challenger_evaluations",
+        "performance_memory_snapshot",
+        "selector_summary",
+        "top_failure_patterns",
+        "recent_research_rankings",
+        "important_sources",
+    }
+    assert expected_keys.issubset(set(bundle.keys()))
+
+
+def test_paste_to_llm_contains_required_blocks(tmp_path):
+    registry = tmp_path / "registry.json"
+    _write_json(registry, {"candidates": {}})
+
+    exporter = ResearchBundleExporter(
+        registry_file=str(registry),
+        status_file=str(tmp_path / "status.json"),
+        engine_state_file=str(tmp_path / "engine_state.json"),
+        review_queue_file=str(tmp_path / "review.json"),
+        output_dir=str(tmp_path / "llm_exports"),
+    )
+    exporter.export()
+
+    paste = (tmp_path / "llm_exports" / "paste_to_llm.md").read_text(encoding="utf-8")
+    assert "Systeminstruksjon til LLM" in paste
+    assert "Eksplisitt mål" in paste
+    assert "Executive summary" in paste
+    assert "Top candidates" in paste
+    assert "Failure patterns" in paste
+    assert "Unngå overfitting" in paste

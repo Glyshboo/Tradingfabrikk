@@ -88,6 +88,18 @@ Guardrail self-check (returnerer exit code 1 hvis en guardrail-check feiler):
 python -m apps.self_check_runner --config configs/active.yaml
 ```
 
+
+Research bundle eksport for manuell LLM copy/paste (ingen API-kall):
+```bash
+python -m apps.export_research_bundle --config configs/active.yaml
+```
+Dette skriver ferdige filer til `runtime/llm_exports/`:
+- `executive_summary.md`
+- `top_candidates.md`
+- `failure_report.md`
+- `research_bundle.json`
+- `paste_to_llm.md`
+
 ## Sikkerhetsnoter
 - Fail-closed: hvis datafeed/account-state er usikker pauser engine automatisk.
 - Live-path oppdaterer account/position konservativt fra user stream; kun paper-path simulerer fills lokalt.

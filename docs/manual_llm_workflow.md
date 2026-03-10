@@ -2,6 +2,12 @@
 
 Denne workflowen er for manuell roundtrip: eksport → copy/paste til LLM → strukturert svar → tilbake til Codex.
 
+## Automatisk refresh (nytt)
+
+`runtime/llm_exports/` oppdateres nå også automatisk når systemet gjør meningsfulle endringer (research fullført, auto-research, challenger-/candidate-state-endringer), styrt av `exports` i `configs/active.yaml`.
+
+For manuell tvangskjøring kan du fortsatt bruke `apps.export_research_bundle`.
+
 ## 1) Generer eksportfiler
 
 Kjør:

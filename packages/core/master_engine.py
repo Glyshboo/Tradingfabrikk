@@ -13,6 +13,7 @@ from packages.execution.adapters import BinanceRequestError, ExecutionAdapter, f
 from packages.execution.position_manager import PositionManager
 from packages.profiles.symbol_profile import SymbolProfile, SymbolProfileManager
 from packages.research.candidate_registry import CandidateRegistry
+from packages.research.export_refresh_service import ExportRefreshService
 from packages.research.strategy_ideas import StrategyIdeaLibrary
 from packages.review.paper_smoke import PaperSmokeWorker
 from packages.review.review_queue import ReviewQueue
@@ -27,7 +28,7 @@ from packages.telemetry.logging_utils import log_event, write_status
 
 
 class MasterEngine:
-    def __init__(self, cfg: dict, execution: ExecutionAdapter):
+    def __init__(self, cfg: dict, execution: ExecutionAdapter, export_refresh_service: ExportRefreshService | None = None):
         self.cfg = cfg
         self.execution = execution
         self.state_store = EngineStateStore(cfg.get("state", {}).get("engine_state_file", "runtime/engine_state.json"))
@@ -79,6 +80,7 @@ class MasterEngine:
         self.symbol_activity: dict[str, float] = {s: 0.0 for s in cfg["symbols"]}
         ideas_dir = (cfg.get("bootstrap") or {}).get("strategy_idea_library_dir", "strategy_ideas")
         self.idea_library = StrategyIdeaLibrary(ideas_dir).report()
+        self.export_refresh_service = export_refresh_service or ExportRefreshService.from_config(cfg)
 
         self._load_persistent_state()
 
@@ -234,7 +236,27 @@ class MasterEngine:
                             self._record_challenger_signal(challenger, shadow_decision, snap.ts or time.time(), snap.price)
             self._persist_state()
             self._write_status(self.engine_state)
+            self._maybe_refresh_exports_schedule()
             await asyncio.sleep(self.cfg["engine"]["decision_interval_sec"])
+
+    def _runtime_candidate_signature(self) -> dict:
+        return {
+            "micro_live": sorted((cid, str(row.get("state") or "")) for cid, row in self.active_micro_live.items()),
+            "paper_candidates": sorted((cid, str(row.get("state") or "")) for cid, row in self.active_paper_candidates.items()),
+            "live_full": sorted((cid, str(row.get("state") or "")) for cid, row in self.active_live_full.items()),
+        }
+
+    def _maybe_refresh_exports(self, trigger: str, context: dict | None = None) -> None:
+        try:
+            self.export_refresh_service.refresh_exports(trigger=trigger, context=context or {})
+        except Exception as exc:
+            log_event("exports_refresh_failed", {"trigger": trigger, "error": str(exc)})
+
+    def _maybe_refresh_exports_schedule(self) -> None:
+        try:
+            self.export_refresh_service.maybe_refresh_on_schedule(context={"mode": self.cfg.get("mode")})
+        except Exception as exc:
+            log_event("exports_refresh_failed", {"trigger": "engine_schedule", "error": str(exc)})
 
     def _ordered_symbols(self) -> list[str]:
         sched_cfg = self.cfg.get("scheduler", {})
@@ -247,6 +269,7 @@ class MasterEngine:
         return hot + cold
 
     def _sync_candidate_state_machine(self) -> None:
+        before_signature = self._runtime_candidate_signature()
         self._auto_progress_paper_lifecycle()
         approved_micro = self.candidate_registry.list_by_state(["approved_for_micro_live", "micro_live_recovering", "micro_live_resumed", "micro_live_active"])
         self.active_micro_live = {}
@@ -281,8 +304,13 @@ class MasterEngine:
         runtime_rows = approved_micro + list(self.candidate_registry.list_by_state(["approved_for_live_full", "live_full_active", "paper_candidate_active", "paper_candidate_paused", "paper_candidate_winning", "paper_candidate_fading", "challenger_active", "challenger_evaluated"]))
         self.overlay_mgr.rebuild(runtime_rows, self.cfg.get("mode", "paper"))
         self._evaluate_paper_trade_outcomes()
-        self._evaluate_challenger_signals()
+        evaluated_challengers = self._evaluate_challenger_signals()
         self._evaluate_paper_candidates()
+        if evaluated_challengers > 0:
+            self._maybe_refresh_exports("challenger_eval", {"evaluated": evaluated_challengers})
+        after_signature = self._runtime_candidate_signature()
+        if after_signature != before_signature:
+            self._maybe_refresh_exports("candidate_change", {"before": before_signature, "after": after_signature})
 
     def _auto_progress_paper_lifecycle(self) -> None:
         transitions = [
@@ -367,10 +395,11 @@ class MasterEngine:
             }
         )
 
-    def _evaluate_challenger_signals(self) -> None:
+    def _evaluate_challenger_signals(self) -> int:
         if self.cfg.get("mode") != "paper":
-            return
+            return 0
         now = time.time()
+        evaluated = 0
         for row in self.challenger_eval_history:
             if row.get("status") != "pending":
                 continue
@@ -394,6 +423,7 @@ class MasterEngine:
             baseline_scale = max(abs(entry * qty * 0.001), 1e-6)
             challenger_relative = max(-1.0, min(1.0, pnl / baseline_scale))
             row["challenger_relative"] = challenger_relative
+            evaluated += 1
             self.performance_memory.update(
                 symbol=str(row.get("symbol") or ""),
                 regime=str(row.get("regime") or ""),
@@ -405,6 +435,7 @@ class MasterEngine:
                 challenger_relative=challenger_relative,
             )
         self.challenger_eval_history = self.challenger_eval_history[-1000:]
+        return evaluated
 
     def _evaluate_paper_trade_outcomes(self) -> None:
         if self.cfg.get("mode") != "paper":

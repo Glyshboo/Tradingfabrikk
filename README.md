@@ -103,6 +103,8 @@ Dette skriver ferdige filer til `runtime/llm_exports/`:
 
 Steg-for-steg manuell workflow er dokumentert i `docs/manual_llm_workflow.md`.
 
+Eksportfiler refreshes også automatisk via `exports`-config: etter research/auto-research, ved materielle kandidat-state-endringer og forsiktig schedule i engine-loop (med cooldown/rate-limit).
+
 ## Sikkerhetsnoter
 - Fail-closed: hvis datafeed/account-state er usikker pauser engine automatisk.
 - Live-path oppdaterer account/position konservativt fra user stream; kun paper-path simulerer fills lokalt.

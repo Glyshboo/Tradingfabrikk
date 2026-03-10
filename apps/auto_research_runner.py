@@ -8,6 +8,7 @@ from apps.llm_research_runner import run_llm_research
 from apps.research_runner import run_research
 from packages.core.config import load_config
 from packages.research.auto_orchestrator import AutoResearchOrchestrator
+from packages.research.export_refresh_service import ExportRefreshService
 
 
 def main() -> None:
@@ -59,6 +60,11 @@ def main() -> None:
         llm_runner=llm_runner,
     )
     report = orchestrator.run_once()
+    if report.get("triggered"):
+        report["export_refresh"] = ExportRefreshService.from_config(cfg).refresh_exports(
+            trigger="auto_research_runner",
+            context={"reasons": report.get("reasons", [])},
+        )
     artifact = pathlib.Path(auto_cfg.get("artifact_file", "runtime/auto_research_last_report.json"))
     artifact.parent.mkdir(parents=True, exist_ok=True)
     artifact.write_text(json.dumps(report, indent=2), encoding="utf-8")

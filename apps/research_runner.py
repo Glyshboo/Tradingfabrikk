@@ -11,6 +11,7 @@ from packages.core.config import REQUIRED_TOP_LEVEL_KEYS
 from packages.core.config import load_config
 from packages.profiles.symbol_profile import SymbolProfile
 from packages.research.candidate_registry import CandidateRegistry
+from packages.research.export_refresh_service import ExportRefreshService
 from packages.research.optimizer import ResearchOptimizer
 from packages.research.strategy_ideas import StrategyIdeaLibrary
 
@@ -184,6 +185,11 @@ def run_research(
         },
     }
     summary = {"candidate_registry": registry.report(), "bootstrap": bootstrap, "generated_candidates": total_candidates}
+    export_refresh = ExportRefreshService.from_config(active_cfg)
+    summary["export_refresh"] = export_refresh.refresh_exports(
+        trigger="research_runner",
+        context={"generated_candidates": total_candidates, "trigger_source": trigger_source},
+    )
     print(json.dumps(summary, indent=2))
     return summary
 

@@ -17,6 +17,17 @@ pip install -r requirements.txt
 ```
 
 ## Kjøring
+### Recommended workflow (standard)
+Den anbefalte standardløypa er **manuell LLM roundtrip** (ingen intern LLM-API):
+
+1. Kjør paper/research som normalt (`02_paper.bat`, `03_research.bat`, evt. `04_all.bat`).
+2. Botten oppdaterer/eksporterer research-filer til `runtime/llm_exports/`.
+3. Åpne `runtime/llm_exports/paste_to_llm.md` og copy/paste manuelt inn i valgfri LLM.
+4. Be LLM om strukturert svar (bruk `llm_response_template.md` som referanse).
+5. Lim LLM-svaret inn i en Codex-prompt for trygg import tilbake i repoet (config/code med tester).
+
+Dette holder live/paper/research robust adskilt fra intern API-avhengighet og gjør arbeidsflyten tydelig for manuell review.
+
 ### Quickstart (Paper)
 Paper er default/safest (`configs/active.yaml` har `mode: paper`):
 ```bash
@@ -71,11 +82,11 @@ scripts\09_review_candidates.bat
 
 This opens a local review UI (default `http://127.0.0.1:8787`) where you can approve to micro-live/full-live (when allowed), reject, hold, and inspect candidate details/artifacts.
 
-LLM research (provider-agnostic, med fallback + budsjett):
+LLM research (optional/legacy intern API-workflow, disabled by default):
 ```bat
 scripts\08_llm_research.bat
 ```
-
+Når `llm_research.enabled: false` får du en veiledende melding om å bruke manuell workflow via `runtime/llm_exports/paste_to_llm.md`.
 
 Strategy idea library status:
 ```bash
@@ -140,6 +151,8 @@ Windows launcher notes:
 
 ## Recovery, review and LLM research updates
 
+> Merk: intern LLM-API research er nå optional/legacy. Standard drift bruker manuell export + copy/paste roundtrip.
+
 - Master engine now persists runtime state (`runtime/engine_state.json`) and data state (`runtime/data_state.json`) and starts in `recovering` mode.
 - Engine pause/resume states are: `running`, `soft_paused`, `recovering`, `auto_resumed`, `hard_paused`.
 - On restart, engine registers a new session, computes downtime, backfills missing 1h/4h candles, restores risk/position state, then enters auto-resume.
@@ -147,7 +160,7 @@ Windows launcher notes:
 - Unified review entrypoint: `python -m apps.review_runner --action list`.
 - Review actions: `approve_micro_live`, `approve_live_full` (only after micro-live states), `reject`, `hold`, `keep_paper`.
 - Review artifacts per candidate are stored in `runtime/review_artifacts/<candidate_id>/` (`summary.md`, `metrics.json`, `config_patch.yaml`, `risk_notes.md`, `provenance.json`, `validation_report.json`).
-- LLM research tooling: `python -m apps.llm_research_runner --prompt "..."` with provider-agnostic config (`llm_research.provider`, `llm_research.fallback_provider`, aliases: `codex/openai`, `claude/anthropic`).
+- Optional/legacy LLM research tooling: `python -m apps.llm_research_runner --prompt "..."` with provider-agnostic config (`llm_research.provider`, `llm_research.fallback_provider`, aliases: `codex/openai`, `claude/anthropic`). Default config keeps this disabled.
 - LLM output never deploys live automatically; it only creates review-bound artifacts.
 
 ## New conservative architecture wiring

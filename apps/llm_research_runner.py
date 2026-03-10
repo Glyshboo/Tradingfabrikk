@@ -34,6 +34,13 @@ Output expectations:
 - If uncertain, reduce confidence and add warnings.
 """
 
+def _manual_workflow_message(export_path: str = "runtime/llm_exports/paste_to_llm.md") -> str:
+    return (
+        "[legacy/optional] Internal LLM API research is disabled in config. "
+        f"Use the standard manual workflow: open {export_path}, copy/paste into your LLM, "
+        "then bring the response back to Codex for implementation."
+    )
+
 
 def _compact_research_bundle(status_file: str, ideas_dir: str = "strategy_ideas") -> dict:
     status_path = pathlib.Path(status_file)
@@ -100,6 +107,13 @@ def run_llm_research(
 ) -> dict:
     cfg = load_config(config_path)
     llm_cfg = cfg.get("llm_research") or cfg.get("llm", {})
+    if not llm_cfg.get("enabled", False):
+        message = _manual_workflow_message()
+        result = {"skipped": "llm_research_disabled", "message": message}
+        print(message)
+        print(json.dumps(result, indent=2))
+        return result
+
     svc = LLMResearchService(llm_cfg)
     ideas_dir = (cfg.get("bootstrap") or {}).get("strategy_idea_library_dir", "strategy_ideas")
     bundle = _compact_research_bundle(status_file, ideas_dir=ideas_dir)

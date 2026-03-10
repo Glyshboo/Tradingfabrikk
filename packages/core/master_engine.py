@@ -17,6 +17,7 @@ from packages.research.strategy_ideas import StrategyIdeaLibrary
 from packages.review.paper_smoke import PaperSmokeWorker
 from packages.review.review_queue import ReviewQueue
 from packages.risk.engine import RiskEngine
+from packages.selector.performance_memory import PerformanceMemory
 from packages.selector.regime_engine import RegimeEngine
 from packages.selector.strategy_selector import StrategySelector
 from packages.strategies.range_mr import RangeMR
@@ -45,7 +46,8 @@ class MasterEngine:
         )
         self.risk = RiskEngine(cfg["risk"])
         self.regime = RegimeEngine()
-        self.selector = StrategySelector(cfg["selector"]["base_edge"])
+        self.performance_memory = PerformanceMemory(cfg.get("selector", {}).get("performance_memory", {}))
+        self.selector = StrategySelector(cfg["selector"]["base_edge"], performance_memory=self.performance_memory)
         self.profile_mgr = SymbolProfileManager(interval_sec=cfg["engine"]["profile_update_sec"])
         self.audit = AuditStore(cfg["telemetry"]["audit_db"])
         self.account = AccountState(
@@ -277,6 +279,7 @@ class MasterEngine:
 
         runtime_rows = approved_micro + list(self.candidate_registry.list_by_state(["approved_for_live_full", "live_full_active", "paper_candidate_active", "paper_candidate_paused"]))
         self.overlay_mgr.rebuild(runtime_rows, self.cfg.get("mode", "paper"))
+        self._evaluate_paper_trade_outcomes()
         self._evaluate_challenger_signals()
         self._evaluate_paper_candidates()
 
@@ -355,7 +358,53 @@ class MasterEngine:
             row["status"] = "evaluated"
             row["result_pnl"] = pnl
             row["result_ts"] = now
+            baseline_scale = max(abs(entry * qty * 0.001), 1e-6)
+            challenger_relative = max(-1.0, min(1.0, pnl / baseline_scale))
+            row["challenger_relative"] = challenger_relative
+            self.performance_memory.update(
+                symbol=str(row.get("symbol") or ""),
+                regime=str(row.get("regime") or ""),
+                strategy=str(row.get("strategy") or ""),
+                config=str(row.get("config") or ""),
+                pnl=pnl,
+                source="challenger",
+                ts=now,
+                challenger_relative=challenger_relative,
+            )
         self.challenger_eval_history = self.challenger_eval_history[-1000:]
+
+    def _evaluate_paper_trade_outcomes(self) -> None:
+        if self.cfg.get("mode") != "paper":
+            return
+        now = time.time()
+        for row in self.paper_trade_history:
+            if row.get("status") != "pending":
+                continue
+            opened_ts = float(row.get("opened_ts") or 0.0)
+            window_sec = float(row.get("window_sec") or self.performance_memory.paper_window_sec)
+            if opened_ts <= 0 or now - opened_ts < window_sec:
+                continue
+            symbol = str(row.get("symbol") or "")
+            snap = self.data.get_snapshot(symbol)
+            if not snap:
+                continue
+            side = row.get("side")
+            entry = float(row.get("entry_basis") or 0.0)
+            qty = float(row.get("qty") or 0.0)
+            pnl = (snap.price - entry) * qty if side == "BUY" else (entry - snap.price) * qty
+            row["status"] = "evaluated"
+            row["result_pnl"] = pnl
+            row["result_ts"] = now
+            self.performance_memory.update(
+                symbol=symbol,
+                regime=str(row.get("regime") or ""),
+                strategy=str(row.get("strategy") or ""),
+                config=str(row.get("config") or ""),
+                pnl=pnl,
+                source="paper",
+                ts=now,
+            )
+        self.paper_trade_history = self.paper_trade_history[-500:]
 
     def _micro_live_context_for_symbol(self, symbol: str) -> dict | None:
         cids = [cid for cid in self.overlay_mgr.status().get("by_symbol", {}).get(symbol, []) if self.overlay_mgr.active.get(cid, {}).get("lane") == "micro_live"]
@@ -447,8 +496,31 @@ class MasterEngine:
             return
         self.audit.save_decision(decision)
         payload = decision.as_audit_payload()
-        trade_row = {"ts": time.time(), "symbol": decision.symbol, "side": side, "qty": qty, "mode": self.cfg.get("mode"), "micro_live": bool(micro_ctx), "runtime_model": decision.runtime_model, "overlay_candidate_id": decision.overlay_candidate_id}
+        snap = self.data.get_snapshot(decision.symbol)
+        trade_row = {
+            "ts": time.time(),
+            "symbol": decision.symbol,
+            "side": side,
+            "qty": qty,
+            "mode": self.cfg.get("mode"),
+            "micro_live": bool(micro_ctx),
+            "runtime_model": decision.runtime_model,
+            "overlay_candidate_id": decision.overlay_candidate_id,
+        }
         if self.cfg.get("mode") == "paper":
+            trade_row.update(
+                {
+                    "strategy": decision.selected_strategy,
+                    "config": decision.selected_config,
+                    "regime": decision.regime,
+                    "entry_basis": snap.price if snap else 0.0,
+                    "opened_ts": time.time(),
+                    "window_sec": self.performance_memory.paper_window_sec,
+                    "status": "pending",
+                    "result_pnl": None,
+                    "result_ts": None,
+                }
+            )
             self.paper_trade_history.append(trade_row)
         else:
             self.live_trade_history.append(trade_row)
@@ -515,6 +587,7 @@ class MasterEngine:
         self.paper_trade_history = payload.get("paper_trade_history", [])[-500:]
         self.live_trade_history = payload.get("live_trade_history", [])[-500:]
         self.challenger_eval_history = payload.get("challenger_eval_history", [])[-1000:]
+        self.performance_memory.import_state(payload.get("performance_memory_state", {}))
         self.review_context = payload.get("review_context", {})
         self.active_micro_live = payload.get("micro_live_active", {})
         self.active_paper_candidates = payload.get("paper_candidate_active", {})
@@ -533,6 +606,7 @@ class MasterEngine:
         payload["paper_trade_history"] = self.paper_trade_history[-500:]
         payload["live_trade_history"] = self.live_trade_history[-500:]
         payload["challenger_eval_history"] = self.challenger_eval_history[-1000:]
+        payload["performance_memory_state"] = self.performance_memory.export_state()
         payload["review_context"] = self.review_context
         payload["micro_live_active"] = self.active_micro_live
         payload["paper_candidate_active"] = self.active_paper_candidates

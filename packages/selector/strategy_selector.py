@@ -5,11 +5,13 @@ from typing import Dict, List, Tuple
 from packages.profiles.symbol_profile import SymbolProfile
 
 from packages.core.models import DecisionRecord, Regime, StrategySignal
+from packages.selector.performance_memory import PerformanceMemory
 
 
 class StrategySelector:
-    def __init__(self, base_edge: Dict[str, float]):
+    def __init__(self, base_edge: Dict[str, float], performance_memory: PerformanceMemory | None = None):
         self.base_edge = base_edge
+        self.performance_memory = performance_memory
 
     def select(
         self,
@@ -42,17 +44,45 @@ class StrategySelector:
             if symbol_profile:
                 profile_penalty = max(0.0, 1.0 - symbol_profile.liquidity_signature) * 0.02
                 funding_cost = max(funding_cost, max(0.0, symbol_profile.funding_behavior) * 0.01)
-            total = base - spread_cost - slippage_cost - funding_cost - exposure_penalty - corr_penalty - profile_penalty
+            memory = {
+                "learned_adjustment": 0.0,
+                "uncertainty_penalty": 0.0,
+                "memory_sample_count": 0.0,
+                "memory_recent_pnl": 0.0,
+                "memory_hit_rate": 0.5,
+                "memory_avg_result": 0.0,
+                "memory_challenger_relative": 0.0,
+            }
+            if self.performance_memory:
+                memory = self.performance_memory.score_components(symbol, regime.value, strategy_name, cfg_name)
+            total = (
+                base
+                + memory["learned_adjustment"]
+                - memory["uncertainty_penalty"]
+                - spread_cost
+                - slippage_cost
+                - funding_cost
+                - exposure_penalty
+                - corr_penalty
+                - profile_penalty
+            )
             key = f"{strategy_name}:{cfg_name}"
             scores[key] = round(total, 6)
             components[key] = {
                 "base": round(base, 6),
+                "learned_adjustment": memory["learned_adjustment"],
+                "uncertainty_penalty": memory["uncertainty_penalty"],
                 "spread_cost": round(spread_cost, 6),
                 "slippage_cost": round(slippage_cost, 6),
                 "funding_cost": round(funding_cost, 6),
                 "exposure_penalty": round(exposure_penalty, 6),
                 "correlation_penalty": round(corr_penalty, 6),
                 "profile_penalty": round(profile_penalty, 6),
+                "memory_sample_count": memory["memory_sample_count"],
+                "memory_recent_pnl": memory["memory_recent_pnl"],
+                "memory_hit_rate": memory["memory_hit_rate"],
+                "memory_avg_result": memory["memory_avg_result"],
+                "memory_challenger_relative": memory["memory_challenger_relative"],
                 "total": round(total, 6),
             }
 

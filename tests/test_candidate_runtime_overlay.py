@@ -64,6 +64,15 @@ def test_paper_mode_baseline_champion_with_shadow_challenger(tmp_path):
     assert [c.candidate_id for c in runtime.challengers] == ["cand_a"]
 
 
+def test_backtest_pass_auto_progresses_to_paper_smoke_running(tmp_path):
+    engine = MasterEngine(_cfg(tmp_path), PaperExecutionAdapter())
+    engine.candidate_registry.register("cand_flow", 1.0, {"symbols": ["BTCUSDT"]})
+    engine.candidate_registry.transition("cand_flow", "config_generated")
+    engine.candidate_registry.transition("cand_flow", "backtest_pass")
+    engine._auto_progress_paper_lifecycle()
+    assert engine.candidate_registry.get("cand_flow")["state"] == "paper_smoke_running"
+
+
 def test_multiple_challengers_same_symbol_in_paper(tmp_path):
     engine = MasterEngine(_cfg(tmp_path), PaperExecutionAdapter())
     _register_paper_candidate(engine, "cand_a")
@@ -116,7 +125,70 @@ def test_multiple_challengers_same_symbol_in_paper(tmp_path):
     }
     engine._evaluate_paper_candidates()
     assert engine.candidate_registry.get("cand_a")["state"] == "paper_candidate_pass"
-    assert engine.candidate_registry.get("cand_b")["state"] == "paper_candidate_pass"
+    assert engine.candidate_registry.get("cand_b")["state"] == "edge_decay"
+
+
+def test_auto_progression_to_ready_for_review_from_paper_pass(tmp_path):
+    engine = MasterEngine(_cfg(tmp_path), PaperExecutionAdapter())
+    _register_paper_candidate(engine, "cand_pass")
+    now = time.time()
+    engine.challenger_eval_history = [
+        {
+            "symbol": "BTCUSDT",
+            "regime": "RANGE",
+            "strategy": "RangeMR",
+            "config": "cand_pass_cfg",
+            "side": "BUY",
+            "signal_ts": now - 2,
+            "runtime_model": "challenger:paper_candidate",
+            "overlay_candidate_id": "cand_pass",
+            "hypothetical_qty": 0.01,
+            "entry_basis": 100.0,
+            "window_sec": 1,
+            "status": "evaluated",
+            "result_pnl": 0.2,
+            "result_ts": now - 0.1,
+        },
+    ]
+    engine.active_paper_candidates = {
+        "cand_pass": {"state": "paper_candidate_active", "started_ts": now - 5, "symbols": ["BTCUSDT"]},
+    }
+    engine._evaluate_paper_candidates()
+    assert engine.candidate_registry.get("cand_pass")["state"] == "paper_candidate_pass"
+    engine._auto_progress_paper_lifecycle()
+    assert engine.candidate_registry.get("cand_pass")["state"] == "ready_for_review"
+    assert len(engine.review_queue.list_ready()) == 1
+
+
+def test_edge_decay_degrades_to_needs_revalidation(tmp_path):
+    engine = MasterEngine(_cfg(tmp_path), PaperExecutionAdapter())
+    _register_paper_candidate(engine, "cand_decay")
+    now = time.time()
+    engine.challenger_eval_history = [
+        {
+            "symbol": "BTCUSDT",
+            "regime": "RANGE",
+            "strategy": "RangeMR",
+            "config": "cand_decay_cfg",
+            "side": "SELL",
+            "signal_ts": now - 2,
+            "runtime_model": "challenger:paper_candidate",
+            "overlay_candidate_id": "cand_decay",
+            "hypothetical_qty": 0.01,
+            "entry_basis": 100.0,
+            "window_sec": 1,
+            "status": "evaluated",
+            "result_pnl": -0.2,
+            "result_ts": now - 0.1,
+        },
+    ]
+    engine.active_paper_candidates = {
+        "cand_decay": {"state": "paper_candidate_active", "started_ts": now - 5, "symbols": ["BTCUSDT"]},
+    }
+    engine._evaluate_paper_candidates()
+    assert engine.candidate_registry.get("cand_decay")["state"] == "edge_decay"
+    engine._auto_progress_paper_lifecycle()
+    assert engine.candidate_registry.get("cand_decay")["state"] == "needs_revalidation"
 
 
 def test_live_mode_overlay_resolution_still_conservative(tmp_path):

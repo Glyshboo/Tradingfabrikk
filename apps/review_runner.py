@@ -31,6 +31,8 @@ def main() -> None:
     record = registry.get(args.candidate_id)
     if record is None:
         raise SystemExit(f"candidate not found in registry: {args.candidate_id}")
+    if args.action == "approve_micro_live" and record.get("state") != "ready_for_review":
+        raise SystemExit("approve_micro_live requires ready_for_review state")
     if args.action == "approve_live_full" and record.get("state") not in {
         "approved_for_micro_live",
         "micro_live_active",

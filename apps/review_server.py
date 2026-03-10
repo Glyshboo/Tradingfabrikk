@@ -150,6 +150,8 @@ class ReviewHandler(BaseHTTPRequestHandler):
                 raise ValueError("candidate not found")
             if record.get("type") in {"risk", "execution", "code"} and record.get("track") != "strict":
                 raise ValueError("protected candidate types must remain on strict track")
+            if action == "approve_micro_live" and record.get("state") != "ready_for_review":
+                raise ValueError("approve_micro_live requires ready_for_review state")
             if action == "approve_live_full" and record.get("state") not in {
                 "approved_for_micro_live",
                 "micro_live_active",

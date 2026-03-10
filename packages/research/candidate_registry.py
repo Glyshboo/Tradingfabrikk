@@ -13,8 +13,14 @@ STATES = [
     "backtest_pass",
     "paper_smoke_running",
     "paper_smoke_pass",
+    "challenger_active",
+    "challenger_evaluated",
     "paper_candidate_active",
     "paper_candidate_paused",
+    "paper_candidate_winning",
+    "paper_candidate_fading",
+    "edge_decay",
+    "needs_revalidation",
     "paper_candidate_pass",
     "paper_candidate_fail",
     "ready_for_review",
@@ -97,7 +103,21 @@ class CandidateRegistry:
         data = self._load()
         if candidate_id in data["candidates"]:
             current_state = data["candidates"][candidate_id].get("state", "idea_proposed")
-            if state in {"rejected", "validation_failed", "micro_live_paused", "paper_candidate_active", "paper_candidate_paused", "paper_candidate_pass", "paper_candidate_fail"}:
+            if state in {
+                "rejected",
+                "validation_failed",
+                "micro_live_paused",
+                "paper_candidate_active",
+                "paper_candidate_paused",
+                "paper_candidate_pass",
+                "paper_candidate_fail",
+                "challenger_active",
+                "challenger_evaluated",
+                "paper_candidate_winning",
+                "paper_candidate_fading",
+                "edge_decay",
+                "needs_revalidation",
+            }:
                 pass
             elif STATE_ORDER[state] < STATE_ORDER.get(current_state, 0):
                 raise ValueError(f"invalid backward transition {current_state} -> {state}")
@@ -107,6 +127,29 @@ class CandidateRegistry:
             history.append({"state": state, "ts": time.time()})
             data["candidates"][candidate_id]["history"] = history
             self._save(data)
+
+    def ensure_review_queued(self, review_queue, candidate_id: str, reason: str) -> None:
+        row = self.get(candidate_id)
+        if row is None:
+            return
+        review_queue.enqueue(
+            {
+                "id": candidate_id,
+                "type": row.get("type", "config"),
+                "track": row.get("track", "fast"),
+                "symbols": row.get("symbols") or row.get("meta", {}).get("symbols") or [],
+                "regimes": row.get("regimes") or row.get("meta", {}).get("regimes") or [],
+                "strategy_family": row.get("strategy_family") or row.get("meta", {}).get("strategy_family"),
+                "provider": row.get("provider", "unknown"),
+                "backtest_result": row.get("artifacts", {}).get("backtest_result"),
+                "oos_result": row.get("artifacts", {}).get("oos_result"),
+                "paper_smoke_result": row.get("artifacts", {}).get("paper_smoke_result"),
+                "paper_challenger_result": row.get("artifacts", {}).get("paper_challenger_result"),
+                "recommendation": row.get("artifacts", {}).get("recommendation", "manual_review"),
+                "created_ts": time.time(),
+                "reason": reason,
+            }
+        )
 
     def list_by_state(self, states: list[str]) -> list[dict]:
         data = self._load()
@@ -157,6 +200,7 @@ class CandidateRegistry:
                 "track": row.get("track", "fast"),
                 "type": row.get("type", "config"),
                 "provider": row.get("provider", "unknown"),
+                "lifecycle_reason": row.get("meta", {}).get("lifecycle_reason", ""),
             } for cid, row in data["candidates"].items()],
             key=lambda x: x.get("updated_ts") or 0,
             reverse=True,

@@ -106,7 +106,9 @@ review:
     auto_open_browser: true
 
 llm_research:
-  enabled: true
+  # Optional/legacy workflow: internal provider API calls.
+  # Recommended default is manual roundtrip via runtime/llm_exports/paste_to_llm.md.
+  enabled: false
   provider: codex
   fallback_provider: claude
   mode: advisory
@@ -135,6 +137,7 @@ auto_research:
     challenger_failure_streak: 4
     cooldown_hours: 6
   llm:
+    # Optional/legacy internal LLM step. Keep disabled for standard workflow.
     enabled: false
     run_after_deterministic: false
 

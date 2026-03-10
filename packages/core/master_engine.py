@@ -844,6 +844,8 @@ class MasterEngine:
                     "provider": llm_cfg.get("provider"),
                     "fallback": llm_cfg.get("fallback_provider"),
                     "enabled": llm_cfg.get("enabled", False),
+                    "workflow": "manual_exports" if not llm_cfg.get("enabled", False) else "internal_api_optional",
+                    "manual_prompt_file": "runtime/llm_exports/paste_to_llm.md",
                     "budget_limits": llm_cfg.get("budgets", {}),
                     "budget_usage": budget_runtime,
                 },

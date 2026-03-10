@@ -1,6 +1,13 @@
-# Manual LLM workflow (ingen API-integrasjon)
+# Manual LLM workflow (standard/default)
 
-Denne workflowen er for manuell roundtrip: eksport → copy/paste til LLM → strukturert svar → tilbake til Codex.
+Dette er den **offisielle standard-workflowen**: botten gjør research/backtesting/incubation selv, eksporterer filer, og brukeren gjør manuell LLM roundtrip via copy/paste.
+
+Kort flyt:
+1. Kjør paper/research
+2. Botten eksporterer til `runtime/llm_exports/`
+3. Bruker copy-paster `paste_to_llm.md` inn i en LLM manuelt
+4. Bruker sender LLM-svaret tilbake til Codex for trygg implementasjon
+
 
 ## Automatisk refresh (nytt)
 
@@ -96,3 +103,9 @@ Legg ved tester og vis hvilke filer som ble endret.
 - Ingen LLM-API integrasjon.
 - Ingen automatisk parsing/import av LLM-svar.
 - Workflowen er bevisst enkel: copy/paste + strukturert format + manuell vurdering.
+
+## Legacy/optional intern LLM-API
+
+Intern LLM-API research finnes fortsatt for kompatibilitet, men er **ikke standard drift** og er deaktivert som default i `configs/active.yaml` (`llm_research.enabled: false`, `auto_research.llm.enabled: false`).
+
+Hvis du likevel aktiverer den, skal output fortsatt behandles som review-gated forslag (ingen auto-live deploy).

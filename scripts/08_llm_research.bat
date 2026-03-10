@@ -2,6 +2,9 @@
 setlocal
 cd /d "%~dp0.."
 
+echo [INFO] Optional/legacy launcher: internal LLM API research.
+echo [INFO] Standard workflow is manual export + copy/paste via runtime\llm_exports\paste_to_llm.md.
+
 set "PYTHON_EXE=.venv\Scripts\python.exe"
 if not exist "%PYTHON_EXE%" set "PYTHON_EXE=python"
 

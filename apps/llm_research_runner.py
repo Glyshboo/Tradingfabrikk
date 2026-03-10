@@ -14,6 +14,27 @@ from packages.research.strategy_ideas import StrategyIdeaLibrary
 from packages.review.review_queue import ReviewQueue
 
 
+DEFAULT_EDGE_RESEARCH_PROMPT = """You are an advisory-only crypto futures research analyst. Return ONLY strict JSON matching the required schema.
+
+Mission:
+- Propose robust, testable NET edge hypotheses for Binance futures.
+- Prioritize durable net edge (after fees, slippage, and funding) over raw gross profit.
+- Assume overfitting is the #1 risk and design against it.
+
+Hard constraints:
+- No auto-live deploy. No order decisions. No execution/risk-engine policy changes.
+- Review-gated output only. Fail closed if evidence is weak.
+- Propose only hypotheses that can be validated with backtest + OOS + paper/micro-live review.
+
+Output expectations:
+- Explain why the edge may exist in real market microstructure/behavior.
+- Explicitly separate recommendations into: config tweak, search-space tweak, regime/selector tweak, and strict-track code idea.
+- Include concrete failure-mode target, expected market regime, validation plan, and overfit risk controls.
+- Keep config/search-space patches minimal, safe, and compatible with existing provider/budget architecture.
+- If uncertain, reduce confidence and add warnings.
+"""
+
+
 def _compact_research_bundle(status_file: str, ideas_dir: str = "strategy_ideas") -> dict:
     status_path = pathlib.Path(status_file)
     status = json.loads(status_path.read_text(encoding="utf-8")) if status_path.exists() else {}
@@ -24,11 +45,16 @@ def _compact_research_bundle(status_file: str, ideas_dir: str = "strategy_ideas"
     active_symbols = status.get("symbols", []) or ["BTCUSDT"]
     active_regimes = list((status.get("current_regime") or {}).values()) or ["RANGE", "TREND_UP"]
     llm_ideas = lib.summarize_for_llm(symbols=active_symbols[:4], regimes=active_regimes[:4], limit_per_pair=3)
+    latest_candidates = candidate_report.get("latest", [])
     return {
         "recent_performance": status.get("risk_caps_status", {}),
         "regime_distribution": status.get("current_regime", {}),
         "top_failure_cases": [status.get("last_decision", {}).get("blocked_reason")],
         "spread_slippage_funding": status.get("last_decision", {}).get("score_components", {}),
+        "execution_quality": {
+            "latest_order_failures": status.get("latest_order_failures", []),
+            "last_decision_reason": status.get("last_decision", {}).get("reason"),
+        },
         "risk_state": {"safe_pause": status.get("safe_pause"), "reduce_only": status.get("reduce_only")},
         "candidate_registry_summary": candidate_report,
         "startup_restart_recovery": {
@@ -37,6 +63,15 @@ def _compact_research_bundle(status_file: str, ideas_dir: str = "strategy_ideas"
             "account_sync_health": status.get("account_sync_health", {}),
         },
         "paper_micro_live_outcomes": candidate_report.get("latest", []),
+        "review_feedback_hints": [
+            {
+                "candidate_id": row.get("id"),
+                "state": row.get("state"),
+                "track": row.get("track"),
+                "type": row.get("type"),
+            }
+            for row in latest_candidates[:6]
+        ],
         "review_queue": queue_rows,
         "strategy_idea_library": {
             "summary": {
@@ -57,7 +92,7 @@ def run_llm_research(
     *,
     config_path: str,
     status_file: str = "runtime/status.json",
-    prompt: str = "Diagnose current system and suggest config candidates.",
+    prompt: str = DEFAULT_EDGE_RESEARCH_PROMPT,
     trigger_source: str = "manual",
     trigger_reasons: list[str] | None = None,
     trigger_context: dict | None = None,
@@ -74,6 +109,13 @@ def run_llm_research(
     candidate_type = "code" if code_level else ("search-space" if structured.get("search_space_patch") else "config")
     track = "strict" if candidate_type == "code" else "fast"
     executable_ok, executable_errors, normalized = validate_llm_candidate_payload(cfg, structured)
+    research_fields = {
+        "edge_hypothesis": structured.get("edge_hypothesis", ""),
+        "failure_mode_target": structured.get("failure_mode_target", ""),
+        "expected_market_regime": structured.get("expected_market_regime", ""),
+        "validation_plan": structured.get("validation_plan", ""),
+        "risk_to_overfit": structured.get("risk_to_overfit", ""),
+    }
 
     candidate_id = f"llm_{artifact['id'][:10]}"
     registry = CandidateRegistry()
@@ -98,11 +140,17 @@ def run_llm_research(
             "track": track,
             "summary": artifact["summary"][:500],
             "diagnosis": artifact.get("structured", {}).get("diagnosis", ""),
+            "edge_hypothesis": research_fields["edge_hypothesis"],
+            "failure_mode_target": research_fields["failure_mode_target"],
+            "expected_market_regime": research_fields["expected_market_regime"],
+            "validation_plan": research_fields["validation_plan"],
+            "risk_to_overfit": research_fields["risk_to_overfit"],
             "backtest_result": None,
             "oos_result": None,
             "config_patch": normalized.get("config_patch", {}),
             "strategy_profile_patch": normalized.get("strategy_profile_patch", {}),
             "search_space_patch": normalized.get("search_space_patch", {}),
+            "research_fields": research_fields,
             "risk_notes": "requires manual validation; LLM output never auto-deploys",
             "provider_used": artifact["provider"],
             "validation_report": validation_report,
@@ -165,7 +213,7 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", default="configs/active.yaml")
     parser.add_argument("--status-file", default="runtime/status.json")
-    parser.add_argument("--prompt", default="Diagnose current system and suggest config candidates.")
+    parser.add_argument("--prompt", default=DEFAULT_EDGE_RESEARCH_PROMPT)
     args = parser.parse_args()
     run_llm_research(config_path=args.config, status_file=args.status_file, prompt=args.prompt)
 

@@ -15,14 +15,36 @@ _PROVIDER_ALIASES = {
     "anthropic": "anthropic",
 }
 
+REQUIRED_STRUCTURED_KEYS = [
+    "summary",
+    "diagnosis",
+    "edge_hypothesis",
+    "failure_mode_target",
+    "expected_market_regime",
+    "proposed_actions",
+    "config_patch",
+    "strategy_profile_patch",
+    "search_space_patch",
+    "validation_plan",
+    "risk_to_overfit",
+    "confidence",
+    "warnings",
+]
+
 
 def empty_structured() -> dict:
     return {
         "summary": "",
         "diagnosis": "",
+        "edge_hypothesis": "",
+        "failure_mode_target": "",
+        "expected_market_regime": "",
         "proposed_actions": [],
         "config_patch": {},
+        "strategy_profile_patch": {},
         "search_space_patch": {},
+        "validation_plan": "",
+        "risk_to_overfit": "",
         "confidence": 0.0,
         "warnings": ["llm_unavailable_or_invalid"],
     }
@@ -97,12 +119,25 @@ class LLMResearchService:
             return empty_structured()
         try:
             parsed = json.loads(response.raw_text)
+            if not isinstance(parsed, dict):
+                return empty_structured()
+            missing = [k for k in REQUIRED_STRUCTURED_KEYS if k not in parsed]
+            if missing:
+                normalized = empty_structured()
+                normalized["warnings"] = [f"missing_required_keys:{','.join(missing)}"]
+                return normalized
             return {
                 "summary": str(parsed.get("summary", ""))[:2000],
                 "diagnosis": str(parsed.get("diagnosis", ""))[:4000],
+                "edge_hypothesis": str(parsed.get("edge_hypothesis", ""))[:3000],
+                "failure_mode_target": str(parsed.get("failure_mode_target", ""))[:2500],
+                "expected_market_regime": str(parsed.get("expected_market_regime", ""))[:1200],
                 "proposed_actions": parsed.get("proposed_actions") if isinstance(parsed.get("proposed_actions"), list) else [],
                 "config_patch": parsed.get("config_patch") if isinstance(parsed.get("config_patch"), dict) else {},
+                "strategy_profile_patch": parsed.get("strategy_profile_patch") if isinstance(parsed.get("strategy_profile_patch"), dict) else {},
                 "search_space_patch": parsed.get("search_space_patch") if isinstance(parsed.get("search_space_patch"), dict) else {},
+                "validation_plan": str(parsed.get("validation_plan", ""))[:2500],
+                "risk_to_overfit": str(parsed.get("risk_to_overfit", ""))[:2500],
                 "confidence": float(parsed.get("confidence", 0.0) or 0.0),
                 "warnings": parsed.get("warnings") if isinstance(parsed.get("warnings"), list) else [],
             }
@@ -131,8 +166,8 @@ class LLMResearchService:
             for provider_name in tried:
                 try:
                     final_prompt = (
-                        f"Return ONLY strict JSON with keys: summary, diagnosis, proposed_actions, config_patch, "
-                        f"search_space_patch, confidence, warnings.\n\n{prompt}"
+                        f"Return ONLY strict JSON with keys: {', '.join(REQUIRED_STRUCTURED_KEYS)}. "
+                        f"No markdown, no prose outside JSON.\n\n{prompt}"
                     )
                     if bundle:
                         final_prompt += f"\n\nResearch bundle:\n{json.dumps(bundle, indent=2)[:12000]}"

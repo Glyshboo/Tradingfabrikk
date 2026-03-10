@@ -30,16 +30,19 @@ shared_params:
 
 families:
   TrendCore:
+    mutation_priority: [atr_stop_mult, time_stop_bars]
     params:
       atr_stop_mult: [1.4, 1.8, 2.2, 2.8, 3.4]
       time_stop_bars: [6, 10, 14, 20, 28, 36]
   RangeMR:
+    mutation_priority: [rsi_low, rsi_high, take_profit_atr_mult, atr_stop_mult]
     params:
       rsi_low: [28, 32, 35, 38, 42]
       rsi_high: [58, 62, 65, 68, 72]
       atr_stop_mult: [0.8, 1.0, 1.2, 1.5]
       take_profit_atr_mult: [0.1, 0.2, 0.35, 0.5]
   BreakoutRetest:
+    mutation_priority: [min_range_compression, min_reclaim_distance_atr, max_retest_distance_atr, min_trend_slope]
     params:
       min_range_compression: [0.15, 0.2, 0.3]
       min_trend_slope: [0.0003, 0.00045, 0.0006]
@@ -49,6 +52,7 @@ families:
       long_rsi_min: [50, 52, 55]
       short_rsi_max: [45, 48, 50]
   TrendPullback:
+    mutation_priority: [min_trend_slope, max_pullback_distance_atr, max_chase_distance_atr, long_rsi_pullback_min, short_rsi_pullback_max]
     params:
       min_trend_slope: [0.00035, 0.0005, 0.00065]
       max_pullback_distance_atr: [0.3, 0.45, 0.6]
@@ -59,6 +63,7 @@ families:
       short_rsi_confirm_min: [34, 37, 40]
       short_rsi_pullback_max: [52, 55, 58]
   FailedBreakoutFade:
+    mutation_priority: [min_failed_breakout_distance_atr, min_reversal_slope, min_range_compression, fade_short_rsi_min, fade_long_rsi_max]
     params:
       min_failed_breakout_distance_atr: [0.12, 0.18, 0.25]
       min_reversal_slope: [0.00025, 0.00035, 0.0005]
@@ -72,7 +77,16 @@ mutation:
   refinements_per_seed: 2
   plausible_min_score: 0.3
   max_parameter_changes: 2
+  family_priority_boost_probability: 0.78
+  mutate_composition_probability: 0.18
+  allow_new_family_candidate_probability: 0.06
   keep_composition_probability: 0.88
+  mutation_family_priority_params:
+    BreakoutRetest: [min_range_compression, min_reclaim_distance_atr, max_retest_distance_atr, min_trend_slope]
+    TrendPullback: [min_trend_slope, max_pullback_distance_atr, max_chase_distance_atr, long_rsi_pullback_min, short_rsi_pullback_max]
+    FailedBreakoutFade: [min_failed_breakout_distance_atr, min_reversal_slope, min_range_compression, fade_short_rsi_min, fade_long_rsi_max]
+    TrendCore: [atr_stop_mult, time_stop_bars]
+    RangeMR: [rsi_low, rsi_high, take_profit_atr_mult, atr_stop_mult]
 
 incubation:
   established_entry_families: [TrendCore, RangeMR]
@@ -87,3 +101,11 @@ evaluation:
   max_turnover_per_bar: 350.0
   max_cost_to_gross_ratio: 0.85
   max_base_confidence: 0.75
+  family_threshold_overrides:
+    BreakoutRetest:
+      min_out_sample_trades: 5
+    TrendPullback:
+      min_out_sample_trades: 5
+      max_turnover_per_bar: 320.0
+    FailedBreakoutFade:
+      min_out_sample_sharpe: -0.01

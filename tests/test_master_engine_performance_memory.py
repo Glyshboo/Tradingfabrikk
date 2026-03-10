@@ -113,3 +113,18 @@ def test_challenger_evaluation_tracks_cost_adjusted_and_excursions(tmp_path):
     assert row["result_cost_adjusted_pnl"] < row["result_pnl"]
     assert row["move_quality"] > 0
     assert row["entry_quality"] > 0
+
+
+def test_no_trade_diagnostics_aggregates_family_reasons(tmp_path):
+    engine = MasterEngine(_cfg(tmp_path), PaperExecutionAdapter())
+    engine._last_setup_diagnostics = [
+        {"entry_family": "TrendCore", "reason": "blocked_by_filter:trend_slope_gate", "setup_quality": 0.0},
+        {"entry_family": "TrendCore", "reason": "blocked_by_filter:trend_slope_gate", "setup_quality": 0.0},
+        {"entry_family": "RangeMR", "reason": "entry_no_signal", "setup_quality": 0.0},
+    ]
+
+    engine._record_no_trade_diagnostics("BTCUSDT", "TREND_UP")
+
+    assert engine.no_trade_diagnostics["total_no_trade_events"] == 1
+    assert engine.no_trade_diagnostics["reason_counts"]["blocked_by_filter:trend_slope_gate"] == 1
+    assert engine.no_trade_diagnostics["family_reason_counts"]["TrendCore"]["blocked_by_filter:trend_slope_gate"] == 2

@@ -4,6 +4,7 @@ import json
 import pathlib
 import random
 from collections import defaultdict
+from copy import deepcopy
 from typing import Dict, List
 
 import yaml
@@ -20,53 +21,128 @@ class ResearchOptimizer:
         self.out_dir.mkdir(parents=True, exist_ok=True)
         self._rng = random.Random(seed)
 
-    def _sample_strategy_config(self, strategy_family: str, search_space: Dict) -> Dict:
-        if strategy_family == "RangeMR":
-            return {
-                "rsi_low": self._rng.choice(search_space.get("rsi_low", [32, 35, 38, 40])),
-                "rsi_high": self._rng.choice(search_space.get("rsi_high", [60, 62, 65, 68])),
-                "atr_stop_mult": self._rng.choice(search_space.get("range_atr_stop_mult", [0.8, 1.0, 1.2])),
-                "take_profit_atr_mult": self._rng.choice(search_space.get("take_profit_atr_mult", [0.1, 0.2, 0.35])),
-                "base_confidence": self._rng.choice(search_space.get("base_confidence", [0.5, 0.55, 0.58, 0.62])),
-            }
-        if strategy_family == "BreakoutRetest":
-            return {
-                "min_range_compression": self._rng.choice(search_space.get("br_min_range_compression", [0.15, 0.2, 0.3])),
-                "min_trend_slope": self._rng.choice(search_space.get("br_min_trend_slope", [0.0003, 0.00045, 0.0006])),
-                "min_reclaim_distance_atr": self._rng.choice(search_space.get("br_min_reclaim_distance_atr", [0.01, 0.02, 0.05])),
-                "max_retest_distance_atr": self._rng.choice(search_space.get("br_max_retest_distance_atr", [0.25, 0.35, 0.5])),
-                "atr_stop_mult": self._rng.choice(search_space.get("br_atr_stop_mult", [1.5, 1.8, 2.2])),
-                "long_rsi_min": self._rng.choice(search_space.get("br_long_rsi_min", [50, 52, 55])),
-                "short_rsi_max": self._rng.choice(search_space.get("br_short_rsi_max", [45, 48, 50])),
-                "base_confidence": self._rng.choice(search_space.get("base_confidence", [0.5, 0.55, 0.58, 0.62])),
-            }
-        if strategy_family == "TrendPullback":
-            return {
-                "min_trend_slope": self._rng.choice(search_space.get("tp_min_trend_slope", [0.00035, 0.0005, 0.00065])),
-                "max_pullback_distance_atr": self._rng.choice(search_space.get("tp_max_pullback_distance_atr", [0.3, 0.45, 0.6])),
-                "max_chase_distance_atr": self._rng.choice(search_space.get("tp_max_chase_distance_atr", [0.5, 0.75, 1.0])),
-                "atr_stop_mult": self._rng.choice(search_space.get("tp_atr_stop_mult", [1.8, 2.0, 2.4])),
-                "long_rsi_pullback_min": self._rng.choice(search_space.get("tp_long_rsi_pullback_min", [42, 45, 48])),
-                "long_rsi_confirm_max": self._rng.choice(search_space.get("tp_long_rsi_confirm_max", [60, 63, 66])),
-                "short_rsi_confirm_min": self._rng.choice(search_space.get("tp_short_rsi_confirm_min", [34, 37, 40])),
-                "short_rsi_pullback_max": self._rng.choice(search_space.get("tp_short_rsi_pullback_max", [52, 55, 58])),
-                "base_confidence": self._rng.choice(search_space.get("base_confidence", [0.5, 0.55, 0.58, 0.62])),
-            }
-        if strategy_family == "FailedBreakoutFade":
-            return {
-                "min_failed_breakout_distance_atr": self._rng.choice(search_space.get("fbf_min_failed_breakout_distance_atr", [0.12, 0.18, 0.25])),
-                "min_reversal_slope": self._rng.choice(search_space.get("fbf_min_reversal_slope", [0.00025, 0.00035, 0.0005])),
-                "min_range_compression": self._rng.choice(search_space.get("fbf_min_range_compression", [0.1, 0.15, 0.25])),
-                "atr_stop_mult": self._rng.choice(search_space.get("fbf_atr_stop_mult", [1.2, 1.4, 1.8])),
-                "fade_short_rsi_min": self._rng.choice(search_space.get("fbf_fade_short_rsi_min", [54, 56, 60])),
-                "fade_long_rsi_max": self._rng.choice(search_space.get("fbf_fade_long_rsi_max", [40, 44, 48])),
-                "base_confidence": self._rng.choice(search_space.get("base_confidence", [0.5, 0.55, 0.58, 0.62])),
-            }
-        return {
-            "atr_stop_mult": self._rng.choice(search_space.get("atr_stop_mult", [1.5, 2.0, 2.5, 3.0])),
-            "time_stop_bars": self._rng.choice(search_space.get("time_stop_bars", [8, 12, 16, 24])),
-            "base_confidence": self._rng.choice(search_space.get("base_confidence", [0.5, 0.55, 0.58, 0.62])),
+    def _space_params(self, search_space: Dict, strategy_family: str) -> Dict[str, list]:
+        families = search_space.get("families", {}) if isinstance(search_space, dict) else {}
+        family_cfg = families.get(strategy_family, {}) if isinstance(families, dict) else {}
+        params = family_cfg.get("params") if isinstance(family_cfg, dict) else None
+        if isinstance(params, dict) and params:
+            return {k: v for k, v in params.items() if isinstance(v, list) and v}
+
+        legacy_map = {
+            "TrendCore": {
+                "atr_stop_mult": search_space.get("atr_stop_mult", [1.5, 2.0, 2.5, 3.0]),
+                "time_stop_bars": search_space.get("time_stop_bars", [8, 12, 16, 24]),
+            },
+            "RangeMR": {
+                "rsi_low": search_space.get("rsi_low", [32, 35, 38, 40]),
+                "rsi_high": search_space.get("rsi_high", [60, 62, 65, 68]),
+                "atr_stop_mult": search_space.get("range_atr_stop_mult", [0.8, 1.0, 1.2]),
+                "take_profit_atr_mult": search_space.get("take_profit_atr_mult", [0.1, 0.2, 0.35]),
+            },
+            "BreakoutRetest": {
+                "min_range_compression": search_space.get("br_min_range_compression", [0.15, 0.2, 0.3]),
+                "min_trend_slope": search_space.get("br_min_trend_slope", [0.0003, 0.00045, 0.0006]),
+                "min_reclaim_distance_atr": search_space.get("br_min_reclaim_distance_atr", [0.01, 0.02, 0.05]),
+                "max_retest_distance_atr": search_space.get("br_max_retest_distance_atr", [0.25, 0.35, 0.5]),
+                "atr_stop_mult": search_space.get("br_atr_stop_mult", [1.5, 1.8, 2.2]),
+                "long_rsi_min": search_space.get("br_long_rsi_min", [50, 52, 55]),
+                "short_rsi_max": search_space.get("br_short_rsi_max", [45, 48, 50]),
+            },
+            "TrendPullback": {
+                "min_trend_slope": search_space.get("tp_min_trend_slope", [0.00035, 0.0005, 0.00065]),
+                "max_pullback_distance_atr": search_space.get("tp_max_pullback_distance_atr", [0.3, 0.45, 0.6]),
+                "max_chase_distance_atr": search_space.get("tp_max_chase_distance_atr", [0.5, 0.75, 1.0]),
+                "atr_stop_mult": search_space.get("tp_atr_stop_mult", [1.8, 2.0, 2.4]),
+                "long_rsi_pullback_min": search_space.get("tp_long_rsi_pullback_min", [42, 45, 48]),
+                "long_rsi_confirm_max": search_space.get("tp_long_rsi_confirm_max", [60, 63, 66]),
+                "short_rsi_confirm_min": search_space.get("tp_short_rsi_confirm_min", [34, 37, 40]),
+                "short_rsi_pullback_max": search_space.get("tp_short_rsi_pullback_max", [52, 55, 58]),
+            },
+            "FailedBreakoutFade": {
+                "min_failed_breakout_distance_atr": search_space.get("fbf_min_failed_breakout_distance_atr", [0.12, 0.18, 0.25]),
+                "min_reversal_slope": search_space.get("fbf_min_reversal_slope", [0.00025, 0.00035, 0.0005]),
+                "min_range_compression": search_space.get("fbf_min_range_compression", [0.1, 0.15, 0.25]),
+                "atr_stop_mult": search_space.get("fbf_atr_stop_mult", [1.2, 1.4, 1.8]),
+                "fade_short_rsi_min": search_space.get("fbf_fade_short_rsi_min", [54, 56, 60]),
+                "fade_long_rsi_max": search_space.get("fbf_fade_long_rsi_max", [40, 44, 48]),
+            },
         }
+        return legacy_map.get(strategy_family, legacy_map["TrendCore"])
+
+    def _sample_strategy_config(self, strategy_family: str, search_space: Dict) -> Dict:
+        params = self._space_params(search_space, strategy_family)
+        cfg = {k: self._rng.choice(v) for k, v in params.items()}
+        shared = search_space.get("shared_params", {}) if isinstance(search_space, dict) else {}
+        if not isinstance(shared, dict):
+            shared = {}
+        base_conf = shared.get("base_confidence") or search_space.get("base_confidence") or [0.5, 0.55, 0.58, 0.62]
+        cfg["base_confidence"] = self._rng.choice(base_conf)
+        return cfg
+
+    def _sample_combination(self, strategy_family: str, search_space: Dict) -> Dict:
+        composition_cfg = search_space.get("composition", {}) if isinstance(search_space, dict) else {}
+        filter_packs = composition_cfg.get("filter_packs", ["safe"]) if isinstance(composition_cfg, dict) else ["safe"]
+        exit_packs = composition_cfg.get("exit_packs", ["passthrough"]) if isinstance(composition_cfg, dict) else ["passthrough"]
+        optional_modules = composition_cfg.get("optional_filter_modules", []) if isinstance(composition_cfg, dict) else []
+        family_rules = composition_cfg.get("family_rules", {}).get(strategy_family, {}) if isinstance(composition_cfg, dict) else {}
+        allowed_filters = family_rules.get("filter_packs") if isinstance(family_rules, dict) else None
+        allowed_exits = family_rules.get("exit_packs") if isinstance(family_rules, dict) else None
+
+        picked_filter = self._rng.choice(allowed_filters or filter_packs or ["safe"])
+        picked_exit = self._rng.choice(allowed_exits or exit_packs or ["passthrough"])
+        module_count = min(len(optional_modules), 1 if self._rng.random() < 0.75 else 2)
+        modules = self._rng.sample(optional_modules, k=module_count) if optional_modules and module_count else []
+        return {
+            "entry_family": strategy_family,
+            "filter_pack": picked_filter,
+            "filter_modules": modules,
+            "exit_pack": picked_exit,
+        }
+
+    def _build_candidate_config(self, strategy_family: str, search_space: Dict) -> Dict:
+        cfg = self._sample_strategy_config(strategy_family, search_space)
+        cfg["composition"] = self._sample_combination(strategy_family, search_space)
+        return cfg
+
+    def _candidate_kind(self, strategy_family: str, composition: Dict, search_space: Dict, parent: Dict | None = None) -> str:
+        incubation = search_space.get("incubation", {}) if isinstance(search_space, dict) else {}
+        established = set(incubation.get("established_entry_families", ["TrendCore", "RangeMR"]))
+        if strategy_family not in established:
+            return "new_family_candidate"
+        if parent:
+            if composition != parent:
+                return "combination_candidate"
+            return "config_tweak"
+        if composition.get("filter_pack") != "safe" or composition.get("exit_pack") != "passthrough" or composition.get("filter_modules"):
+            return "combination_candidate"
+        return "config_tweak"
+
+    def _mutate_candidate(self, candidate: Dict, search_space: Dict) -> Dict | None:
+        mutation_cfg = search_space.get("mutation", {}) if isinstance(search_space, dict) else {}
+        if not candidate.get("plausible"):
+            return None
+        if float(candidate.get("score", 0.0)) < float(mutation_cfg.get("plausible_min_score", 0.0)):
+            return None
+
+        cfg = deepcopy(candidate.get("strategy_config") or {})
+        family = candidate.get("strategy_family", "TrendCore")
+        params = self._space_params(search_space, family)
+        change_keys = [k for k in params.keys() if k in cfg] + ["base_confidence"]
+        if not change_keys:
+            return None
+        max_changes = max(1, int(mutation_cfg.get("max_parameter_changes", 2)))
+        change_count = self._rng.randint(1, min(max_changes, len(change_keys)))
+        for key in self._rng.sample(change_keys, k=change_count):
+            options = list(search_space.get("shared_params", {}).get(key, [])) if key == "base_confidence" else list(params.get(key, []))
+            if not options:
+                continue
+            current = cfg.get(key)
+            cfg[key] = self._rng.choice([x for x in options if x != current] or options)
+
+        keep_comp_prob = float(mutation_cfg.get("keep_composition_probability", 0.85))
+        if self._rng.random() > keep_comp_prob:
+            cfg["composition"] = self._sample_combination(family, search_space)
+        return cfg
 
     def _as_payload(self, res: BacktestResult) -> Dict:
         return {
@@ -210,6 +286,14 @@ class ResearchOptimizer:
         by_tuple: Dict[tuple[str, str], List[Dict]] = defaultdict(list)
         thresholds = search_space.get("evaluation", {})
 
+        families_from_space = list((search_space.get("composition", {}) or {}).get("entry_families", []))
+        selected_families = [fam for fam in (families_from_space or strategy_families) if fam in strategy_families]
+        selected_families = selected_families or strategy_families
+
+        mutation_cfg = search_space.get("mutation", {}) if isinstance(search_space, dict) else {}
+        top_k = int(mutation_cfg.get("top_k_seeds", 2))
+        refinements_per_seed = int(mutation_cfg.get("refinements_per_seed", 2))
+
         for symbol in symbols:
             for regime in regimes:
                 candles = data_manager.load_historical_candles(
@@ -225,9 +309,11 @@ class ResearchOptimizer:
                 profile = (symbol_profiles or {}).get(symbol)
                 fee_bps, slippage_bps = effective_backtest_costs(profile)
 
-                for strategy_family in strategy_families:
-                    for i in range(samples):
-                        cfg = self._sample_strategy_config(strategy_family, search_space)
+                bucket_rows: List[Dict] = []
+                sequence = 0
+                for strategy_family in selected_families:
+                    for _ in range(samples):
+                        cfg = self._build_candidate_config(strategy_family, search_space)
                         in_sample, out_sample = bt.run_walk_forward(
                             candles,
                             fee_bps=fee_bps,
@@ -250,8 +336,11 @@ class ResearchOptimizer:
                             cfg=cfg,
                             thresholds=thresholds,
                         )
+                        config_name = f"{symbol.lower()}_{regime.lower()}_{strategy_family.lower()}_{sequence}"
+                        sequence += 1
 
-                        config_name = f"{symbol.lower()}_{regime.lower()}_{strategy_family.lower()}_{i}"
+                        composition = self._strategy_composition_descriptor(strategy_family, cfg)
+                        candidate_kind = self._candidate_kind(strategy_family, composition, search_space)
                         matching_idea = next(
                             (
                                 x
@@ -261,13 +350,13 @@ class ResearchOptimizer:
                             None,
                         )
                         context_ideas = idea_lib.rank_for_symbol_regime(symbol=symbol, regime=regime, limit=4)
-
                         payload = {
                             "id": config_name,
                             "symbol": symbol,
                             "regime": regime,
                             "strategy_family": strategy_family,
-                            "strategy_composition": self._strategy_composition_descriptor(strategy_family, cfg),
+                            "strategy_composition": composition,
+                            "candidate_kind": candidate_kind,
                             "score": eval_result["score"],
                             "plausible": eval_result["plausible"],
                             "rejection_reasons": eval_result["rejection_reasons"],
@@ -279,6 +368,7 @@ class ResearchOptimizer:
                                 "out_sample_no_cost": self._as_payload(out_sample_no_cost),
                             },
                             "fees": {"fee_bps": round(fee_bps, 6), "slippage_bps": round(slippage_bps, 6)},
+                            "strategy_config": cfg,
                             "strategy_config_patch": {strategy_family: {config_name: cfg}},
                             "strategy_profile_patch": {symbol: {regime: [[strategy_family, config_name]]}},
                             "idea_id": matching_idea.get("id") if matching_idea else None,
@@ -286,9 +376,66 @@ class ResearchOptimizer:
                             "idea_strict_track_required": bool(matching_idea.get("strict_track_required", False)) if matching_idea else False,
                             "idea_context_top": context_ideas,
                         }
-                        by_tuple[(symbol, regime)].append(payload)
-                        outfile = self.out_dir / f"{config_name}.json"
-                        outfile.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+                        bucket_rows.append(payload)
+
+                seeds = sorted([x for x in bucket_rows if x.get("plausible")], key=lambda x: x.get("score", -1e9), reverse=True)[:top_k]
+                for seed in seeds:
+                    for refine_idx in range(refinements_per_seed):
+                        mut_cfg = self._mutate_candidate(seed, search_space)
+                        if not mut_cfg:
+                            continue
+                        family = seed["strategy_family"]
+                        in_sample, out_sample = bt.run_walk_forward(
+                            candles,
+                            fee_bps=fee_bps,
+                            slippage_bps=slippage_bps,
+                            strategy_family=family,
+                            strategy_config=mut_cfg,
+                        )
+                        _, out_sample_no_cost = bt.run_walk_forward(
+                            candles,
+                            fee_bps=0.0,
+                            slippage_bps=0.0,
+                            strategy_family=family,
+                            strategy_config=mut_cfg,
+                        )
+                        eval_result = self._evaluate_candidate(
+                            in_sample=in_sample,
+                            out_sample=out_sample,
+                            out_sample_no_cost=out_sample_no_cost,
+                            bars=len(candles),
+                            cfg=mut_cfg,
+                            thresholds=thresholds,
+                        )
+                        config_name = f"{seed['id']}_mut{refine_idx}"
+                        composition = self._strategy_composition_descriptor(family, mut_cfg)
+                        candidate_kind = self._candidate_kind(family, composition, search_space, parent=seed.get("strategy_composition"))
+                        payload = {
+                            **seed,
+                            "id": config_name,
+                            "strategy_composition": composition,
+                            "candidate_kind": candidate_kind,
+                            "mutation_source_id": seed["id"],
+                            "score": eval_result["score"],
+                            "plausible": eval_result["plausible"],
+                            "rejection_reasons": eval_result["rejection_reasons"],
+                            "evaluation": eval_result,
+                            "pnl": out_sample.pnl,
+                            "strategy_config": mut_cfg,
+                            "strategy_config_patch": {family: {config_name: mut_cfg}},
+                            "strategy_profile_patch": {symbol: {regime: [[family, config_name]]}},
+                            "walk_forward": {
+                                "in_sample": self._as_payload(in_sample),
+                                "out_sample": self._as_payload(out_sample),
+                                "out_sample_no_cost": self._as_payload(out_sample_no_cost),
+                            },
+                        }
+                        bucket_rows.append(payload)
+
+                by_tuple[(symbol, regime)].extend(bucket_rows)
+                for row in bucket_rows:
+                    outfile = self.out_dir / f"{row['id']}.json"
+                    outfile.write_text(json.dumps(row, indent=2), encoding="utf-8")
 
         ranking = {}
         for key, rows in by_tuple.items():

@@ -102,8 +102,10 @@ def run_research(
     artifact_root.mkdir(parents=True, exist_ok=True)
     for rows in ranking.values():
         for row in rows:
-            track = "strict" if row.get("strategy_family") not in {"TrendCore", "RangeMR"} or row.get("code_change") else "fast"
-            candidate_type = "search-space" if row.get("search_space_patch") else "config"
+            candidate_kind = row.get("candidate_kind", "config_tweak")
+            strict_kinds = set(space.get("incubation", {}).get("strict_candidate_kinds", ["combination_candidate", "new_family_candidate"]))
+            track = "strict" if candidate_kind in strict_kinds or row.get("idea_strict_track_required") or row.get("code_change") else "fast"
+            candidate_type = "combination" if candidate_kind in {"combination_candidate", "new_family_candidate"} else "config"
             candidate_dir = artifact_root / row["id"]
             candidate_dir.mkdir(parents=True, exist_ok=True)
             summary = row.get("summary", "research-generated config candidate")
@@ -112,6 +114,8 @@ def run_research(
                 "plausible": row.get("plausible", False),
                 "rejection_reasons": row.get("rejection_reasons", []),
                 "evaluation": row.get("evaluation", {}),
+                "candidate_kind": candidate_kind,
+                "strategy_composition": row.get("strategy_composition", {}),
                 "symbol": row["symbol"],
                 "regime": row["regime"],
                 "walk_forward": row.get("walk_forward"),
@@ -152,6 +156,7 @@ def run_research(
                 "symbols": [row["symbol"]],
                 "regimes": [row["regime"]],
                 "candidate_type": candidate_type,
+                "candidate_kind": candidate_kind,
                 "track": track,
                 "summary": summary,
                 "backtest_result": row.get("walk_forward"),
@@ -169,6 +174,8 @@ def run_research(
                 "trigger_source": trigger_source,
                 "trigger_reasons": trigger_reasons or ["manual"],
                 "trigger_context": trigger_context or {},
+                "strategy_family": row.get("strategy_family"),
+                "strategy_composition": row.get("strategy_composition", {}),
             })
             registry.transition(row["id"], "config_generated")
             registry.transition(row["id"], "backtest_pass")

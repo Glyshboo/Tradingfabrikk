@@ -33,6 +33,9 @@ def test_random_search_creates_candidates_per_symbol(tmp_path, monkeypatch):
     assert (out_dir / "ethusdt_trend_up_trendcore_0.json").exists()
     assert Path(out_dir / "ranking.json").exists()
     assert Path(out_dir / "ranking.yaml").exists()
+    top = ranking["BTCUSDT:TREND_UP"][0]
+    assert "strategy_composition" in top
+    assert top["candidate_kind"] in {"config_tweak", "combination_candidate", "new_family_candidate"}
 
 
 def test_score_prefers_stronger_out_of_sample_result():
@@ -131,3 +134,48 @@ def test_sampling_supports_new_entry_families() -> None:
     assert "min_reclaim_distance_atr" in breakout
     assert "max_pullback_distance_atr" in pullback
     assert "min_failed_breakout_distance_atr" in fade
+
+
+def test_sampling_combinations_from_structured_search_space() -> None:
+    optimizer = ResearchOptimizer(seed=3)
+    space = {
+        "composition": {
+            "filter_packs": ["safe", "trend_baseline"],
+            "exit_packs": ["passthrough", "atr_trail"],
+            "optional_filter_modules": ["session_gate"],
+            "family_rules": {"TrendCore": {"filter_packs": ["trend_baseline"], "exit_packs": ["atr_trail"]}},
+        },
+        "families": {"TrendCore": {"params": {"atr_stop_mult": [2.0], "time_stop_bars": [12]}}},
+        "shared_params": {"base_confidence": [0.58]},
+    }
+
+    cfg = optimizer._build_candidate_config("TrendCore", space)
+    assert cfg["composition"]["entry_family"] == "TrendCore"
+    assert cfg["composition"]["filter_pack"] == "trend_baseline"
+    assert cfg["composition"]["exit_pack"] == "atr_trail"
+
+
+def test_mutation_refines_without_full_random_reset() -> None:
+    optimizer = ResearchOptimizer(seed=4)
+    space = {
+        "mutation": {"max_parameter_changes": 2, "plausible_min_score": 0.1, "keep_composition_probability": 1.0},
+        "families": {"TrendCore": {"params": {"atr_stop_mult": [1.8, 2.2], "time_stop_bars": [10, 14]}}},
+        "shared_params": {"base_confidence": [0.54, 0.58]},
+    }
+    seed = {
+        "plausible": True,
+        "score": 1.0,
+        "strategy_family": "TrendCore",
+        "strategy_config": {
+            "atr_stop_mult": 1.8,
+            "time_stop_bars": 10,
+            "base_confidence": 0.54,
+            "composition": {"entry_family": "TrendCore", "filter_pack": "safe", "filter_modules": [], "exit_pack": "passthrough"},
+        },
+    }
+
+    mutated = optimizer._mutate_candidate(seed, space)
+    assert mutated is not None
+    assert mutated["composition"] == seed["strategy_config"]["composition"]
+    changed = [k for k in ["atr_stop_mult", "time_stop_bars", "base_confidence"] if mutated[k] != seed["strategy_config"][k]]
+    assert 1 <= len(changed) <= 2

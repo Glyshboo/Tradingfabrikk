@@ -331,6 +331,8 @@ class MasterEngine:
             self._maybe_refresh_exports("candidate_change", {"before": before_signature, "after": after_signature})
 
     def _auto_progress_paper_lifecycle(self) -> None:
+        strict_kinds = set(self.cfg.get("incubation", {}).get("strict_candidate_kinds", ["combination_candidate", "new_family_candidate"]))
+        strict_hold_sec = float(self.cfg.get("incubation", {}).get("strict_challenger_hold_sec", 120) or 120)
         transitions = [
             ("backtest_pass", "paper_smoke_running", "auto:start_paper_smoke"),
             ("paper_smoke_pass", "challenger_active", "auto:smoke_passed"),
@@ -342,10 +344,38 @@ class MasterEngine:
                 cid = row.get("id")
                 if not cid:
                     continue
+                kind = row.get("candidate_kind") or row.get("meta", {}).get("candidate_kind", "config_tweak")
+                is_strict = kind in strict_kinds or row.get("track") == "strict"
+                if src == "challenger_active" and is_strict:
+                    hold_until = float(row.get("meta", {}).get("challenger_hold_until_ts", 0.0) or 0.0)
+                    if hold_until <= 0:
+                        self.candidate_registry.update_meta(cid, meta_patch={"challenger_hold_until_ts": time.time() + strict_hold_sec, "lifecycle_reason": "incubation:strict_challenger_hold"})
+                        continue
+                    if time.time() < hold_until:
+                        continue
                 self.candidate_registry.update_meta(cid, meta_patch={"lifecycle_reason": reason})
+                if dst == "ready_for_review" and is_strict:
+                    self.candidate_registry.transition(cid, "needs_revalidation")
+                    self.candidate_registry.update_meta(cid, meta_patch={"review_revalidation_required": True, "lifecycle_reason": "incubation:strict_revalidation_required"})
+                    continue
                 self.candidate_registry.transition(cid, dst)
                 if dst == "ready_for_review":
                     self.candidate_registry.ensure_review_queued(self.review_queue, cid, reason="paper_candidate_pass")
+
+        for row in self.candidate_registry.list_by_state(["needs_revalidation"]):
+            cid = row.get("id")
+            if not cid:
+                continue
+            if not row.get("meta", {}).get("review_revalidation_required"):
+                continue
+            challenger = row.get("artifacts", {}).get("paper_challenger_result", {})
+            if float(challenger.get("avg_pnl", -1.0)) < float(self.cfg.get("incubation", {}).get("strict_revalidation_min_avg_pnl", 0.01)):
+                continue
+            if int(challenger.get("evaluated", 0)) < int(self.cfg.get("incubation", {}).get("strict_revalidation_min_evaluations", 2)):
+                continue
+            self.candidate_registry.update_meta(cid, meta_patch={"lifecycle_reason": "incubation:strict_revalidated", "review_revalidation_required": False})
+            self.candidate_registry.transition(cid, "ready_for_review")
+            self.candidate_registry.ensure_review_queued(self.review_queue, cid, reason="strict_revalidation_pass")
 
         for row in self.candidate_registry.list_by_state(["paper_candidate_fail"]):
             cid = row.get("id")
@@ -519,6 +549,7 @@ class MasterEngine:
         fade_avg_pnl = float(self.paper_candidate_cfg.get("fade_avg_pnl", -0.01) or -0.01)
         edge_decay_avg_pnl = float(self.paper_candidate_cfg.get("edge_decay_avg_pnl", -0.05) or -0.05)
         max_negative_ratio = float(self.paper_candidate_cfg.get("max_negative_ratio", 0.7) or 0.7)
+        strict_kinds = set(self.cfg.get("incubation", {}).get("strict_candidate_kinds", ["combination_candidate", "new_family_candidate"]))
         now = time.time()
         for cid, row in self.active_paper_candidates.items():
             if row.get("state") not in {"paper_candidate_active", "paper_candidate_winning", "paper_candidate_fading", "challenger_active", "challenger_evaluated"}:
@@ -538,6 +569,13 @@ class MasterEngine:
                 if evaluations
                 else 1.0
             )
+            candidate_row = self.candidate_registry.get(cid) or {}
+            kind = candidate_row.get("candidate_kind") or candidate_row.get("meta", {}).get("candidate_kind", "config_tweak")
+            required_min_trades = min_trades
+            required_winning_avg_pnl = winning_avg_pnl
+            if kind in strict_kinds:
+                required_min_trades = max(min_trades, int(self.cfg.get("incubation", {}).get("strict_min_trades", min_trades + 1)))
+                required_winning_avg_pnl = max(winning_avg_pnl, float(self.cfg.get("incubation", {}).get("strict_winning_avg_pnl", winning_avg_pnl + 0.01)))
             self.candidate_registry.transition(cid, "challenger_evaluated")
             self.candidate_registry.update_meta(
                 cid,
@@ -551,7 +589,7 @@ class MasterEngine:
                     }
                 },
             )
-            if len(evaluations) < min_trades:
+            if len(evaluations) < required_min_trades:
                 self.candidate_registry.update_meta(cid, meta_patch={"lifecycle_reason": "paper:no_signal_density"})
                 self.candidate_registry.transition(cid, "paper_candidate_fail")
                 continue
@@ -564,7 +602,7 @@ class MasterEngine:
                 self.candidate_registry.update_meta(cid, meta_patch={"lifecycle_reason": "paper:fading_momentum"})
                 self.candidate_registry.transition(cid, "paper_candidate_fading")
                 continue
-            if avg_pnl >= winning_avg_pnl:
+            if avg_pnl >= required_winning_avg_pnl:
                 self.candidate_registry.update_meta(cid, meta_patch={"lifecycle_reason": "paper:winning"})
                 self.candidate_registry.transition(cid, "paper_candidate_winning")
                 self.candidate_registry.transition(cid, "paper_candidate_pass")

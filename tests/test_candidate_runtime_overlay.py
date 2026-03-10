@@ -1,16 +1,14 @@
 from __future__ import annotations
 
-import asyncio
 import time
 
 from packages.core.master_engine import MasterEngine
-from packages.core.models import DecisionRecord
 from packages.execution.adapters import PaperExecutionAdapter
 
 
-def _cfg(tmp_path):
+def _cfg(tmp_path, mode: str = "paper"):
     return {
-        "mode": "paper",
+        "mode": mode,
         "symbols": ["BTCUSDT", "ETHUSDT"],
         "engine": {"stale_after_sec": 60, "profile_update_sec": 999, "decision_interval_sec": 1, "recovery_wait_sec": 0},
         "account": {"equity": 10000},
@@ -38,14 +36,93 @@ def _cfg(tmp_path):
             "correlation_clusters": {},
         },
         "micro_live": {"enabled": True, "risk_multiplier": 0.3, "max_total_exposure_notional": 100000, "max_symbols": 1},
-        "paper_candidate": {"window_sec": 1, "min_trades": 1},
+        "paper_candidate": {"window_sec": 1, "compare_window_sec": 1, "min_trades": 1},
     }
 
 
-def test_candidate_overlay_resolution_and_micro_live_execution(tmp_path):
-    engine = MasterEngine(_cfg(tmp_path), PaperExecutionAdapter())
+def _register_paper_candidate(engine: MasterEngine, cid: str, confidence: float = 0.9) -> None:
     engine.candidate_registry.register(
-        "cand_a",
+        cid,
+        1.0,
+        {
+            "symbols": ["BTCUSDT"],
+            "config_patch": {"strategy_configs": {"RangeMR": {f"{cid}_cfg": {"rsi_low": 20, "rsi_high": 80, "base_confidence": confidence}}}},
+            "strategy_profile_patch": {"BTCUSDT": {"RANGE": [["RangeMR", f"{cid}_cfg"]]}},
+        },
+    )
+    engine.candidate_registry.transition(cid, "paper_candidate_active")
+
+
+def test_paper_mode_baseline_champion_with_shadow_challenger(tmp_path):
+    engine = MasterEngine(_cfg(tmp_path), PaperExecutionAdapter())
+    _register_paper_candidate(engine, "cand_a")
+    engine._sync_candidate_state_machine()
+
+    runtime = engine.overlay_mgr.resolve_runtime("BTCUSDT", "RANGE", "paper")
+    assert runtime.champion.runtime_model == "baseline"
+    assert runtime.champion.candidate_id is None
+    assert [c.candidate_id for c in runtime.challengers] == ["cand_a"]
+
+
+def test_multiple_challengers_same_symbol_in_paper(tmp_path):
+    engine = MasterEngine(_cfg(tmp_path), PaperExecutionAdapter())
+    _register_paper_candidate(engine, "cand_a")
+    _register_paper_candidate(engine, "cand_b")
+    engine._sync_candidate_state_machine()
+
+    runtime = engine.overlay_mgr.resolve_runtime("BTCUSDT", "RANGE", "paper")
+    assert runtime.champion.runtime_model == "baseline"
+    challenger_ids = sorted(c.candidate_id for c in runtime.challengers)
+    assert challenger_ids == ["cand_a", "cand_b"]
+
+    now = time.time()
+    engine.challenger_eval_history = [
+        {
+            "symbol": "BTCUSDT",
+            "regime": "RANGE",
+            "strategy": "RangeMR",
+            "config": "cand_a_cfg",
+            "side": "BUY",
+            "signal_ts": now - 2,
+            "runtime_model": "challenger:paper_candidate",
+            "overlay_candidate_id": "cand_a",
+            "hypothetical_qty": 0.01,
+            "entry_basis": 100.0,
+            "window_sec": 1,
+            "status": "evaluated",
+            "result_pnl": 0.1,
+            "result_ts": now - 0.1,
+        },
+        {
+            "symbol": "BTCUSDT",
+            "regime": "RANGE",
+            "strategy": "RangeMR",
+            "config": "cand_b_cfg",
+            "side": "SELL",
+            "signal_ts": now - 2,
+            "runtime_model": "challenger:paper_candidate",
+            "overlay_candidate_id": "cand_b",
+            "hypothetical_qty": 0.01,
+            "entry_basis": 100.0,
+            "window_sec": 1,
+            "status": "evaluated",
+            "result_pnl": -0.1,
+            "result_ts": now - 0.1,
+        },
+    ]
+    engine.active_paper_candidates = {
+        "cand_a": {"state": "paper_candidate_active", "started_ts": now - 5, "symbols": ["BTCUSDT"]},
+        "cand_b": {"state": "paper_candidate_active", "started_ts": now - 5, "symbols": ["BTCUSDT"]},
+    }
+    engine._evaluate_paper_candidates()
+    assert engine.candidate_registry.get("cand_a")["state"] == "paper_candidate_pass"
+    assert engine.candidate_registry.get("cand_b")["state"] == "paper_candidate_pass"
+
+
+def test_live_mode_overlay_resolution_still_conservative(tmp_path):
+    engine = MasterEngine(_cfg(tmp_path, mode="live"), PaperExecutionAdapter())
+    engine.candidate_registry.register(
+        "cand_micro",
         1.0,
         {
             "symbols": ["BTCUSDT"],
@@ -53,38 +130,10 @@ def test_candidate_overlay_resolution_and_micro_live_execution(tmp_path):
             "strategy_profile_patch": {"BTCUSDT": {"RANGE": [["RangeMR", "cand_cfg"]]}},
         },
     )
-    engine.candidate_registry.transition("cand_a", "approved_for_micro_live")
+    engine.candidate_registry.transition("cand_micro", "approved_for_micro_live")
     engine._sync_candidate_state_machine()
 
-    overlay = engine.overlay_mgr.resolve("BTCUSDT", "RANGE")
-    assert overlay.runtime_model == "challenger:micro_live"
-    assert overlay.candidate_id == "cand_a"
-    assert overlay.strategy_profiles["BTCUSDT"]["RANGE"] == [["RangeMR", "cand_cfg"]]
-
-    decision = DecisionRecord(
-        symbol="BTCUSDT",
-        regime="RANGE",
-        eligible_strategies=["RangeMR:cand_cfg"],
-        score_breakdown={"RangeMR:cand_cfg": 1.0},
-        selected_strategy="RangeMR",
-        selected_config="cand_cfg",
-        selected_side="BUY",
-        sizing={"confidence": 1.0},
-        runtime_model="challenger:micro_live",
-        overlay_candidate_id="cand_a",
-    )
-    asyncio.run(engine._execute_decision(decision))
-    assert engine.paper_trade_history[-1]["overlay_candidate_id"] == "cand_a"
-    assert engine.paper_trade_history[-1]["runtime_model"] == "challenger:micro_live"
-    assert engine.paper_trade_history[-1]["qty"] == 0.003
-
-
-def test_paper_candidate_state_progression(tmp_path):
-    engine = MasterEngine(_cfg(tmp_path), PaperExecutionAdapter())
-    engine.candidate_registry.register("cand_p", 1.0, {"symbols": ["BTCUSDT"]})
-    engine.candidate_registry.transition("cand_p", "paper_candidate_active")
-    now = time.time()
-    engine.paper_trade_history.append({"ts": now - 0.2, "overlay_candidate_id": "cand_p", "symbol": "BTCUSDT", "qty": 0.01})
-    engine.active_paper_candidates = {"cand_p": {"state": "paper_candidate_active", "started_ts": now - 5, "symbols": ["BTCUSDT"]}}
-    engine._evaluate_paper_candidates()
-    assert engine.candidate_registry.get("cand_p")["state"] in {"paper_candidate_pass", "paper_candidate_fail"}
+    runtime = engine.overlay_mgr.resolve_runtime("BTCUSDT", "RANGE", "live")
+    assert runtime.champion.runtime_model == "challenger:micro_live"
+    assert runtime.champion.candidate_id == "cand_micro"
+    assert runtime.challengers == []

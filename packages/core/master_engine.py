@@ -72,6 +72,7 @@ class MasterEngine:
         self.strategy_performance_history: list[dict] = []
         self.paper_trade_history: list[dict] = []
         self.live_trade_history: list[dict] = []
+        self.challenger_eval_history: list[dict] = []
         self.review_context: dict = {}
         self.symbol_activity: dict[str, float] = {s: 0.0 for s in cfg["symbols"]}
         ideas_dir = (cfg.get("bootstrap") or {}).get("strategy_idea_library_dir", "strategy_ideas")
@@ -182,21 +183,8 @@ class MasterEngine:
                 if exit_reason:
                     await self._submit_exit(symbol, exit_reason)
                     continue
-                overlay = self.overlay_mgr.resolve(symbol, regime.value)
-                candidates = []
-                runtime_profiles = overlay.strategy_profiles
-                runtime_configs = overlay.strategy_configs
-                for strat_name, config_name in runtime_profiles.get(symbol, {}).get(regime.value, []):
-                    if strat_name not in self.strategies:
-                        continue
-                    cfg_bucket = runtime_configs.get(strat_name, {})
-                    cfg_row = cfg_bucket.get(config_name)
-                    if not isinstance(cfg_row, dict):
-                        continue
-                    strat = self.strategies[strat_name]
-                    signal = strat.generate_for_context(StrategyContext(snapshot=snap, regime=regime, config=cfg_row))
-                    if signal:
-                        candidates.append((strat_name, config_name, signal))
+                runtime_selection = self.overlay_mgr.resolve_runtime(symbol, regime.value, self.cfg.get("mode", "paper"))
+                champion = runtime_selection.champion
                 cost_proxy = {
                     "spread": (snap.ask - snap.bid) / max(snap.price, 1e-9),
                     "slippage": self.profile_mgr.profiles.get(symbol).slippage_proxy if symbol in self.profile_mgr.profiles else 0.0,
@@ -205,30 +193,42 @@ class MasterEngine:
                 notional = abs(self.account.positions.get(symbol, PositionState(symbol=symbol)).qty) * snap.price
                 exposure_penalty = notional / max(self.account.equity, 1e-9)
                 profile = self.profile_mgr.profiles.get(symbol)
-                decision = self.selector.select(
+                decision = self._build_overlay_decision(
+                    champion,
                     symbol,
                     regime,
-                    candidates,
+                    snap,
                     cost_proxy,
-                    exposure_penalty=exposure_penalty,
-                    symbol_profile=profile,
-                    current_positions={s: p.qty for s, p in self.account.positions.items()},
+                    exposure_penalty,
+                    profile,
                 )
                 if not decision:
-                    if overlay.blocker:
+                    if champion.blocker:
                         self.last_decision = {
                             "symbol": symbol,
                             "regime": regime.value,
-                            "blocked_reason": overlay.blocker,
+                            "blocked_reason": champion.blocker,
                             "runtime_model": "baseline",
                             "overlay_candidate_id": "",
                         }
-                    continue
-                decision.runtime_model = overlay.runtime_model
-                decision.overlay_candidate_id = overlay.candidate_id or ""
-                self.last_decision = decision.as_audit_payload()
-                await self._execute_decision(decision)
-                self.symbol_activity[symbol] = time.time()
+                else:
+                    self.last_decision = decision.as_audit_payload()
+                    await self._execute_decision(decision)
+                    self.symbol_activity[symbol] = time.time()
+
+                if self.cfg.get("mode") == "paper":
+                    for challenger in runtime_selection.challengers:
+                        shadow_decision = self._build_overlay_decision(
+                            challenger,
+                            symbol,
+                            regime,
+                            snap,
+                            cost_proxy,
+                            exposure_penalty,
+                            profile,
+                        )
+                        if shadow_decision:
+                            self._record_challenger_signal(challenger, shadow_decision, snap.ts or time.time(), snap.price)
             self._persist_state()
             self._write_status(self.engine_state)
             await asyncio.sleep(self.cfg["engine"]["decision_interval_sec"])
@@ -276,7 +276,85 @@ class MasterEngine:
 
         runtime_rows = approved_micro + list(self.candidate_registry.list_by_state(["approved_for_live_full", "live_full_active", "paper_candidate_active", "paper_candidate_paused"]))
         self.overlay_mgr.rebuild(runtime_rows, self.cfg.get("mode", "paper"))
+        self._evaluate_challenger_signals()
         self._evaluate_paper_candidates()
+
+    def _build_overlay_decision(self, overlay, symbol: str, regime, snap, cost_proxy: dict, exposure_penalty: float, profile) -> DecisionRecord | None:
+        candidates = []
+        runtime_profiles = overlay.strategy_profiles
+        runtime_configs = overlay.strategy_configs
+        for strat_name, config_name in runtime_profiles.get(symbol, {}).get(regime.value, []):
+            if strat_name not in self.strategies:
+                continue
+            cfg_bucket = runtime_configs.get(strat_name, {})
+            cfg_row = cfg_bucket.get(config_name)
+            if not isinstance(cfg_row, dict):
+                continue
+            strat = self.strategies[strat_name]
+            signal = strat.generate_for_context(StrategyContext(snapshot=snap, regime=regime, config=cfg_row))
+            if signal:
+                candidates.append((strat_name, config_name, signal))
+        decision = self.selector.select(
+            symbol,
+            regime,
+            candidates,
+            cost_proxy,
+            exposure_penalty=exposure_penalty,
+            symbol_profile=profile,
+            current_positions={s: p.qty for s, p in self.account.positions.items()},
+        )
+        if not decision:
+            return None
+        decision.runtime_model = overlay.runtime_model
+        decision.overlay_candidate_id = overlay.candidate_id or ""
+        return decision
+
+    def _record_challenger_signal(self, challenger, decision: DecisionRecord, signal_ts: float, entry_basis: float) -> None:
+        qty = max(0.0, self.cfg["sizing"]["base_qty"] * float(decision.sizing.get("confidence", 0.0)))
+        self.challenger_eval_history.append(
+            {
+                "symbol": decision.symbol,
+                "regime": decision.regime,
+                "strategy": decision.selected_strategy,
+                "config": decision.selected_config,
+                "side": decision.selected_side,
+                "signal_ts": signal_ts,
+                "runtime_model": challenger.runtime_model,
+                "overlay_candidate_id": challenger.candidate_id or "",
+                "hypothetical_qty": qty,
+                "entry_basis": entry_basis,
+                "window_sec": float(self.paper_candidate_cfg.get("compare_window_sec", self.paper_candidate_cfg.get("window_sec", 300)) or 300),
+                "status": "pending",
+                "result_pnl": None,
+                "result_ts": None,
+            }
+        )
+
+    def _evaluate_challenger_signals(self) -> None:
+        if self.cfg.get("mode") != "paper":
+            return
+        now = time.time()
+        for row in self.challenger_eval_history:
+            if row.get("status") != "pending":
+                continue
+            signal_ts = float(row.get("signal_ts") or 0.0)
+            window_sec = float(row.get("window_sec") or 0.0)
+            if signal_ts <= 0 or (now - signal_ts) < window_sec:
+                continue
+            snap = self.data.get_snapshot(row.get("symbol", ""))
+            if not snap:
+                continue
+            entry = float(row.get("entry_basis") or 0.0)
+            qty = float(row.get("hypothetical_qty") or 0.0)
+            side = row.get("side")
+            if side == "BUY":
+                pnl = (snap.price - entry) * qty
+            else:
+                pnl = (entry - snap.price) * qty
+            row["status"] = "evaluated"
+            row["result_pnl"] = pnl
+            row["result_ts"] = now
+        self.challenger_eval_history = self.challenger_eval_history[-1000:]
 
     def _micro_live_context_for_symbol(self, symbol: str) -> dict | None:
         cids = [cid for cid in self.overlay_mgr.status().get("by_symbol", {}).get(symbol, []) if self.overlay_mgr.active.get(cid, {}).get("lane") == "micro_live"]
@@ -310,8 +388,15 @@ class MasterEngine:
             started = float(row.get("started_ts") or now)
             if now - started < window_sec:
                 continue
-            trades = [x for x in self.paper_trade_history if x.get("overlay_candidate_id") == cid and now - float(x.get("ts", 0)) <= window_sec]
-            next_state = "paper_candidate_pass" if len(trades) >= min_trades else "paper_candidate_fail"
+            evaluations = [
+                x for x in self.challenger_eval_history
+                if x.get("overlay_candidate_id") == cid
+                and x.get("status") == "evaluated"
+                and now - float(x.get("result_ts", 0)) <= window_sec
+            ]
+            next_state = "paper_candidate_pass" if len(evaluations) >= min_trades else "paper_candidate_fail"
+            avg_pnl = (sum(float(x.get("result_pnl") or 0.0) for x in evaluations) / len(evaluations)) if evaluations else 0.0
+            self.candidate_registry.update_meta(cid, artifacts_patch={"paper_challenger_result": {"evaluated": len(evaluations), "avg_pnl": avg_pnl, "window_sec": window_sec, "ts": now}})
             self.candidate_registry.transition(cid, next_state)
 
     async def _execute_decision(self, decision: DecisionRecord) -> None:
@@ -428,6 +513,7 @@ class MasterEngine:
         self.strategy_performance_history = payload.get("strategy_performance_history", [])[-500:]
         self.paper_trade_history = payload.get("paper_trade_history", [])[-500:]
         self.live_trade_history = payload.get("live_trade_history", [])[-500:]
+        self.challenger_eval_history = payload.get("challenger_eval_history", [])[-1000:]
         self.review_context = payload.get("review_context", {})
         self.active_micro_live = payload.get("micro_live_active", {})
         self.active_paper_candidates = payload.get("paper_candidate_active", {})
@@ -445,6 +531,7 @@ class MasterEngine:
         payload["strategy_performance_history"] = self.strategy_performance_history[-500:]
         payload["paper_trade_history"] = self.paper_trade_history[-500:]
         payload["live_trade_history"] = self.live_trade_history[-500:]
+        payload["challenger_eval_history"] = self.challenger_eval_history[-1000:]
         payload["review_context"] = self.review_context
         payload["micro_live_active"] = self.active_micro_live
         payload["paper_candidate_active"] = self.active_paper_candidates
@@ -497,7 +584,7 @@ class MasterEngine:
                     "budget_usage": budget_runtime,
                 },
                 "micro_live": {"enabled": self.micro_live_cfg.get("enabled", False), "active": self.active_micro_live},
-                "paper_candidate": {"active": self.active_paper_candidates, "config": self.paper_candidate_cfg},
+                "paper_candidate": {"active": self.active_paper_candidates, "config": self.paper_candidate_cfg, "challenger_evaluations": self.challenger_eval_history[-50:]},
                 "live_full": {"active": self.active_live_full},
                 "runtime_overlays": self.overlay_mgr.status(),
                 "bootstrap": {

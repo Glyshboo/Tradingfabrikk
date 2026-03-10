@@ -6,6 +6,12 @@ from typing import List
 from packages.core.models import MarketSnapshot, Regime, StrategyContext
 from packages.selector.regime_engine import RegimeEngine
 from packages.strategies.composition import build_strategy_evaluator
+from packages.strategies.entry_families import (
+    BreakoutRetestEntryFamily,
+    EntryFamilyStrategyPlugin,
+    FailedBreakoutFadeEntryFamily,
+    TrendPullbackEntryFamily,
+)
 from packages.strategies.range_mr import RangeMR
 from packages.strategies.trend_core import TrendCore
 
@@ -27,6 +33,13 @@ class CandleBacktester:
         self.strategies = {
             "TrendCore": TrendCore(),
             "RangeMR": RangeMR(),
+            "BreakoutRetest": EntryFamilyStrategyPlugin(
+                BreakoutRetestEntryFamily(), {Regime.TREND_UP, Regime.TREND_DOWN, Regime.HIGH_VOL}
+            ),
+            "TrendPullback": EntryFamilyStrategyPlugin(TrendPullbackEntryFamily(), {Regime.TREND_UP, Regime.TREND_DOWN}),
+            "FailedBreakoutFade": EntryFamilyStrategyPlugin(
+                FailedBreakoutFadeEntryFamily(), {Regime.RANGE, Regime.HIGH_VOL, Regime.TREND_UP, Regime.TREND_DOWN}
+            ),
         }
         self.strategy_evaluator = build_strategy_evaluator(self.strategies)
 
@@ -81,20 +94,58 @@ class CandleBacktester:
         rs = avg_gain / avg_loss
         return 100 - (100 / (1 + rs))
 
+    def _compute_trend_slope(self, candles: list[dict], i: int, lookback: int = 12) -> float | None:
+        if i < lookback:
+            return None
+        close_now = float(candles[i]["close"])
+        close_prev = float(candles[i - lookback]["close"])
+        if close_prev <= 0:
+            return None
+        return (close_now - close_prev) / close_prev / float(lookback)
+
+    def _compute_breakout_distance(self, candles: list[dict], i: int, window: int = 20, atr: float | None = None) -> float | None:
+        if i < window or atr is None or atr <= 0:
+            return None
+        segment = candles[i - window : i]
+        recent_high = max(float(c["high"]) for c in segment)
+        recent_low = min(float(c["low"]) for c in segment)
+        close_now = float(candles[i]["close"])
+        if close_now > recent_high:
+            return (close_now - recent_high) / atr
+        if close_now < recent_low:
+            return (close_now - recent_low) / atr
+        return 0.0
+
+    def _compute_range_compression(self, candles: list[dict], i: int, short_window: int = 8, long_window: int = 32) -> float | None:
+        if i < long_window:
+            return None
+        short_seg = candles[i - short_window + 1 : i + 1]
+        long_seg = candles[i - long_window + 1 : i + 1]
+        short_range = sum(float(c["high"]) - float(c["low"]) for c in short_seg) / float(short_window)
+        long_range = sum(float(c["high"]) - float(c["low"]) for c in long_seg) / float(long_window)
+        if long_range <= 1e-12:
+            return 0.0
+        ratio = short_range / long_range
+        return max(0.0, min(1.0, 1.0 - ratio))
+
     def _snapshot_for_bar(self, candles: list[dict], i: int, strategy_config: dict | None = None) -> MarketSnapshot:
         close = float(candles[i]["close"])
         cfg = strategy_config or {}
         atr_period = int(cfg.get("atr_period", 14))
         rsi_period = int(cfg.get("rsi_period", 14))
         # Backtest bruker candle-close syntetisk spread=0 for deterministisk signalparitet.
+        atr = self._compute_atr(candles, i, period=max(2, atr_period))
         return MarketSnapshot(
             symbol="BACKTEST",
             price=close,
             bid=close,
             ask=close,
             candle_close=float(candles[i - 1]["close"]) if i > 0 else close,
-            atr=self._compute_atr(candles, i, period=max(2, atr_period)),
+            atr=atr,
             rsi=self._compute_rsi(candles, i, period=max(2, rsi_period)),
+            trend_slope=self._compute_trend_slope(candles, i),
+            breakout_distance_from_recent_range=self._compute_breakout_distance(candles, i, atr=atr),
+            range_compression_score=self._compute_range_compression(candles, i),
             ts=float(i),
         )
 

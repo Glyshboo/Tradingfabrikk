@@ -113,3 +113,21 @@ def test_random_search_score_changes_with_cost_model(tmp_path, monkeypatch):
     low_score = low_cost_ranking["BTCUSDT:RANGE"][0]["score"]
     high_score = high_cost_ranking["BTCUSDT:RANGE"][0]["score"]
     assert high_score < low_score
+
+
+def test_sampling_supports_new_entry_families() -> None:
+    optimizer = ResearchOptimizer(seed=11)
+    space = {
+        "base_confidence": [0.58],
+        "br_min_range_compression": [0.2],
+        "tp_min_trend_slope": [0.0005],
+        "fbf_min_failed_breakout_distance_atr": [0.18],
+    }
+
+    breakout = optimizer._sample_strategy_config("BreakoutRetest", space)
+    pullback = optimizer._sample_strategy_config("TrendPullback", space)
+    fade = optimizer._sample_strategy_config("FailedBreakoutFade", space)
+
+    assert "min_reclaim_distance_atr" in breakout
+    assert "max_pullback_distance_atr" in pullback
+    assert "min_failed_breakout_distance_atr" in fade

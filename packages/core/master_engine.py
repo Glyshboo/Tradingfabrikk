@@ -6,7 +6,7 @@ import pathlib
 import time
 
 from packages.core.candidate_runtime import CandidateRuntimeOverlayManager
-from packages.core.models import AccountState, DecisionRecord, PositionState, StrategyContext
+from packages.core.models import AccountState, DecisionRecord, PositionState, Regime, StrategyContext
 from packages.core.state_store import EngineStateStore
 from packages.data.data_manager import DataManager
 from packages.execution.adapters import BinanceRequestError, ExecutionAdapter, format_order
@@ -21,8 +21,14 @@ from packages.risk.engine import RiskEngine
 from packages.selector.performance_memory import PerformanceMemory
 from packages.selector.regime_engine import RegimeEngine
 from packages.selector.strategy_selector import StrategySelector
-from packages.strategies.range_mr import RangeMR
 from packages.strategies.composition import build_strategy_evaluator
+from packages.strategies.entry_families import (
+    BreakoutRetestEntryFamily,
+    EntryFamilyStrategyPlugin,
+    FailedBreakoutFadeEntryFamily,
+    TrendPullbackEntryFamily,
+)
+from packages.strategies.range_mr import RangeMR
 from packages.strategies.trend_core import TrendCore
 from packages.telemetry.audit import AuditStore
 from packages.telemetry.logging_utils import log_event, write_status
@@ -59,7 +65,17 @@ class MasterEngine:
             leverage=1.0,
             known=True,
         )
-        self.strategies = {"TrendCore": TrendCore(), "RangeMR": RangeMR()}
+        self.strategies = {
+            "TrendCore": TrendCore(),
+            "RangeMR": RangeMR(),
+            "BreakoutRetest": EntryFamilyStrategyPlugin(
+                BreakoutRetestEntryFamily(), {Regime.TREND_UP, Regime.TREND_DOWN, Regime.HIGH_VOL}
+            ),
+            "TrendPullback": EntryFamilyStrategyPlugin(TrendPullbackEntryFamily(), {Regime.TREND_UP, Regime.TREND_DOWN}),
+            "FailedBreakoutFade": EntryFamilyStrategyPlugin(
+                FailedBreakoutFadeEntryFamily(), {Regime.RANGE, Regime.HIGH_VOL, Regime.TREND_UP, Regime.TREND_DOWN}
+            ),
+        }
         self.strategy_evaluator = build_strategy_evaluator(self.strategies)
         self.last_decision: dict | None = None
         self.position_mgr = PositionManager()

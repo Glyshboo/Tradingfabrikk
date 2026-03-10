@@ -5,6 +5,7 @@ from typing import List
 
 from packages.core.models import MarketSnapshot, Regime, StrategyContext
 from packages.selector.regime_engine import RegimeEngine
+from packages.strategies.composition import build_strategy_evaluator
 from packages.strategies.range_mr import RangeMR
 from packages.strategies.trend_core import TrendCore
 
@@ -27,6 +28,7 @@ class CandleBacktester:
             "TrendCore": TrendCore(),
             "RangeMR": RangeMR(),
         }
+        self.strategy_evaluator = build_strategy_evaluator(self.strategies)
 
     def _as_candles(self, candles_or_prices: List[dict] | List[float]) -> list[dict]:
         if not candles_or_prices:
@@ -108,10 +110,10 @@ class CandleBacktester:
         regime: Regime,
         strategy_config: dict | None = None,
     ) -> int:
-        strategy = self.strategies.get(strategy_family)
-        if strategy is None:
+        if strategy_family not in self.strategies:
             return 0
-        signal = strategy.generate_for_context(
+        signal = self.strategy_evaluator.evaluate(
+            strategy_family,
             StrategyContext(snapshot=snapshot, regime=regime, config=strategy_config or {})
         )
         if not signal:

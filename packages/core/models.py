@@ -72,6 +72,14 @@ class StrategyContext:
 
 
 @dataclass
+class StrategyComposition:
+    entry_family: str
+    filter_pack: str = "none"
+    exit_pack: str = "passthrough"
+    filter_modules: list[str] = field(default_factory=list)
+
+
+@dataclass
 class OrderRequest:
     symbol: str
     side: str

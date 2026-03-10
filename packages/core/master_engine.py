@@ -22,6 +22,7 @@ from packages.selector.performance_memory import PerformanceMemory
 from packages.selector.regime_engine import RegimeEngine
 from packages.selector.strategy_selector import StrategySelector
 from packages.strategies.range_mr import RangeMR
+from packages.strategies.composition import build_strategy_evaluator
 from packages.strategies.trend_core import TrendCore
 from packages.telemetry.audit import AuditStore
 from packages.telemetry.logging_utils import log_event, write_status
@@ -59,6 +60,7 @@ class MasterEngine:
             known=True,
         )
         self.strategies = {"TrendCore": TrendCore(), "RangeMR": RangeMR()}
+        self.strategy_evaluator = build_strategy_evaluator(self.strategies)
         self.last_decision: dict | None = None
         self.position_mgr = PositionManager()
         self.current_regimes: dict[str, str] = {}
@@ -355,8 +357,10 @@ class MasterEngine:
             cfg_row = cfg_bucket.get(config_name)
             if not isinstance(cfg_row, dict):
                 continue
-            strat = self.strategies[strat_name]
-            signal = strat.generate_for_context(StrategyContext(snapshot=snap, regime=regime, config=cfg_row))
+            signal = self.strategy_evaluator.evaluate(
+                strat_name,
+                StrategyContext(snapshot=snap, regime=regime, config=cfg_row),
+            )
             if signal:
                 candidates.append((strat_name, config_name, signal))
         decision = self.selector.select(

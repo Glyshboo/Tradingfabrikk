@@ -29,6 +29,39 @@ class ResearchOptimizer:
                 "take_profit_atr_mult": self._rng.choice(search_space.get("take_profit_atr_mult", [0.1, 0.2, 0.35])),
                 "base_confidence": self._rng.choice(search_space.get("base_confidence", [0.5, 0.55, 0.58, 0.62])),
             }
+        if strategy_family == "BreakoutRetest":
+            return {
+                "min_range_compression": self._rng.choice(search_space.get("br_min_range_compression", [0.15, 0.2, 0.3])),
+                "min_trend_slope": self._rng.choice(search_space.get("br_min_trend_slope", [0.0003, 0.00045, 0.0006])),
+                "min_reclaim_distance_atr": self._rng.choice(search_space.get("br_min_reclaim_distance_atr", [0.01, 0.02, 0.05])),
+                "max_retest_distance_atr": self._rng.choice(search_space.get("br_max_retest_distance_atr", [0.25, 0.35, 0.5])),
+                "atr_stop_mult": self._rng.choice(search_space.get("br_atr_stop_mult", [1.5, 1.8, 2.2])),
+                "long_rsi_min": self._rng.choice(search_space.get("br_long_rsi_min", [50, 52, 55])),
+                "short_rsi_max": self._rng.choice(search_space.get("br_short_rsi_max", [45, 48, 50])),
+                "base_confidence": self._rng.choice(search_space.get("base_confidence", [0.5, 0.55, 0.58, 0.62])),
+            }
+        if strategy_family == "TrendPullback":
+            return {
+                "min_trend_slope": self._rng.choice(search_space.get("tp_min_trend_slope", [0.00035, 0.0005, 0.00065])),
+                "max_pullback_distance_atr": self._rng.choice(search_space.get("tp_max_pullback_distance_atr", [0.3, 0.45, 0.6])),
+                "max_chase_distance_atr": self._rng.choice(search_space.get("tp_max_chase_distance_atr", [0.5, 0.75, 1.0])),
+                "atr_stop_mult": self._rng.choice(search_space.get("tp_atr_stop_mult", [1.8, 2.0, 2.4])),
+                "long_rsi_pullback_min": self._rng.choice(search_space.get("tp_long_rsi_pullback_min", [42, 45, 48])),
+                "long_rsi_confirm_max": self._rng.choice(search_space.get("tp_long_rsi_confirm_max", [60, 63, 66])),
+                "short_rsi_confirm_min": self._rng.choice(search_space.get("tp_short_rsi_confirm_min", [34, 37, 40])),
+                "short_rsi_pullback_max": self._rng.choice(search_space.get("tp_short_rsi_pullback_max", [52, 55, 58])),
+                "base_confidence": self._rng.choice(search_space.get("base_confidence", [0.5, 0.55, 0.58, 0.62])),
+            }
+        if strategy_family == "FailedBreakoutFade":
+            return {
+                "min_failed_breakout_distance_atr": self._rng.choice(search_space.get("fbf_min_failed_breakout_distance_atr", [0.12, 0.18, 0.25])),
+                "min_reversal_slope": self._rng.choice(search_space.get("fbf_min_reversal_slope", [0.00025, 0.00035, 0.0005])),
+                "min_range_compression": self._rng.choice(search_space.get("fbf_min_range_compression", [0.1, 0.15, 0.25])),
+                "atr_stop_mult": self._rng.choice(search_space.get("fbf_atr_stop_mult", [1.2, 1.4, 1.8])),
+                "fade_short_rsi_min": self._rng.choice(search_space.get("fbf_fade_short_rsi_min", [54, 56, 60])),
+                "fade_long_rsi_max": self._rng.choice(search_space.get("fbf_fade_long_rsi_max", [40, 44, 48])),
+                "base_confidence": self._rng.choice(search_space.get("base_confidence", [0.5, 0.55, 0.58, 0.62])),
+            }
         return {
             "atr_stop_mult": self._rng.choice(search_space.get("atr_stop_mult", [1.5, 2.0, 2.5, 3.0])),
             "time_stop_bars": self._rng.choice(search_space.get("time_stop_bars", [8, 12, 16, 24])),

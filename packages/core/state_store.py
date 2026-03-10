@@ -36,6 +36,7 @@ class EngineStateStore:
             "strategy_performance_history": [],
             "paper_trade_history": [],
             "live_trade_history": [],
+            "performance_memory_state": {},
             "review_queue": [],
             "candidate_registry_snapshot": {},
         }

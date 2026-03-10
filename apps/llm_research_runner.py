@@ -53,19 +53,21 @@ def _compact_research_bundle(status_file: str, ideas_dir: str = "strategy_ideas"
     }
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--config", default="configs/active.yaml")
-    parser.add_argument("--status-file", default="runtime/status.json")
-    parser.add_argument("--prompt", default="Diagnose current system and suggest config candidates.")
-    args = parser.parse_args()
-
-    cfg = load_config(args.config)
+def run_llm_research(
+    *,
+    config_path: str,
+    status_file: str = "runtime/status.json",
+    prompt: str = "Diagnose current system and suggest config candidates.",
+    trigger_source: str = "manual",
+    trigger_reasons: list[str] | None = None,
+    trigger_context: dict | None = None,
+) -> dict:
+    cfg = load_config(config_path)
     llm_cfg = cfg.get("llm_research") or cfg.get("llm", {})
     svc = LLMResearchService(llm_cfg)
     ideas_dir = (cfg.get("bootstrap") or {}).get("strategy_idea_library_dir", "strategy_ideas")
-    bundle = _compact_research_bundle(args.status_file, ideas_dir=ideas_dir)
-    artifact = svc.research(args.prompt, bundle=bundle)
+    bundle = _compact_research_bundle(status_file, ideas_dir=ideas_dir)
+    artifact = svc.research(prompt, bundle=bundle)
     structured = artifact.get("structured", {})
     warnings = structured.get("warnings") or []
     code_level = any("code" in str(x).lower() for x in warnings) or bool(structured.get("proposed_code_patch"))
@@ -106,6 +108,9 @@ def main() -> None:
             "validation_report": validation_report,
             "artifact_bundle": str(candidate_dir),
             "code_change": code_level,
+            "trigger_source": trigger_source,
+            "trigger_reasons": trigger_reasons or ["manual"],
+            "trigger_context": trigger_context or {},
         },
     )
     registry.transition(candidate_id, "config_generated")
@@ -144,11 +149,25 @@ def main() -> None:
         "provider": artifact.get("provider"),
         "structured": artifact.get("structured", {}),
         "budget": artifact.get("budget", {}),
+        "trigger_source": trigger_source,
+        "trigger_reasons": trigger_reasons or ["manual"],
+        "trigger_context": trigger_context or {},
         "ts": time.time(),
     })
     payload["llm_review_history"] = history[-200:]
     state_store.save(payload)
-    print(json.dumps({"artifact": artifact, "candidate_id": candidate_id}, indent=2))
+    result = {"artifact": artifact, "candidate_id": candidate_id}
+    print(json.dumps(result, indent=2))
+    return result
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--config", default="configs/active.yaml")
+    parser.add_argument("--status-file", default="runtime/status.json")
+    parser.add_argument("--prompt", default="Diagnose current system and suggest config candidates.")
+    args = parser.parse_args()
+    run_llm_research(config_path=args.config, status_file=args.status_file, prompt=args.prompt)
 
 
 if __name__ == "__main__":

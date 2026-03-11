@@ -4,8 +4,11 @@ import json
 import pathlib
 import time
 import uuid
+from json import JSONDecodeError
 from dataclasses import dataclass
 from typing import Any
+
+from packages.telemetry.logging_utils import log_event
 
 
 @dataclass
@@ -42,7 +45,27 @@ class EngineStateStore:
         }
 
     def load(self) -> dict[str, Any]:
-        return json.loads(self.path.read_text(encoding="utf-8"))
+        try:
+            payload = json.loads(self.path.read_text(encoding="utf-8"))
+        except JSONDecodeError:
+            log_event("runtime_json_invalid", {"file": str(self.path), "fallback": "engine_state_default"})
+            payload = self._default_payload()
+            self.save(payload)
+            return payload
+        except OSError as exc:
+            log_event("runtime_json_read_error", {"file": str(self.path), "error": str(exc), "fallback": "engine_state_default"})
+            payload = self._default_payload()
+            self.save(payload)
+            return payload
+        if not isinstance(payload, dict):
+            log_event("runtime_json_invalid", {"file": str(self.path), "fallback": "engine_state_default"})
+            payload = self._default_payload()
+            self.save(payload)
+            return payload
+        defaults = self._default_payload()
+        for key, value in defaults.items():
+            payload.setdefault(key, value)
+        return payload
 
     def save(self, payload: dict[str, Any]) -> None:
         self.path.write_text(json.dumps(payload, indent=2), encoding="utf-8")

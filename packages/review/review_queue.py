@@ -3,6 +3,9 @@ from __future__ import annotations
 import json
 import pathlib
 import time
+from json import JSONDecodeError
+
+from packages.telemetry.logging_utils import log_event
 
 ALLOWED_ACTIONS = {"approve_micro_live", "approve_live_full", "reject", "hold", "keep_paper"}
 
@@ -14,8 +17,32 @@ class ReviewQueue:
         if not self.path.exists():
             self.path.write_text(json.dumps({"queue": [], "history": []}, indent=2), encoding="utf-8")
 
+    def _default_payload(self) -> dict:
+        return {"queue": [], "history": []}
+
     def _load(self) -> dict:
-        return json.loads(self.path.read_text(encoding="utf-8"))
+        try:
+            payload = json.loads(self.path.read_text(encoding="utf-8"))
+        except JSONDecodeError:
+            log_event("runtime_json_invalid", {"file": str(self.path), "fallback": "review_queue_default"})
+            payload = self._default_payload()
+            self._save(payload)
+            return payload
+        except OSError as exc:
+            log_event("runtime_json_read_error", {"file": str(self.path), "error": str(exc), "fallback": "review_queue_default"})
+            payload = self._default_payload()
+            self._save(payload)
+            return payload
+        if not isinstance(payload, dict):
+            log_event("runtime_json_invalid", {"file": str(self.path), "fallback": "review_queue_default"})
+            payload = self._default_payload()
+            self._save(payload)
+            return payload
+        if not isinstance(payload.get("queue"), list):
+            payload["queue"] = []
+        if not isinstance(payload.get("history"), list):
+            payload["history"] = []
+        return payload
 
     def _save(self, payload: dict) -> None:
         self.path.write_text(json.dumps(payload, indent=2), encoding="utf-8")

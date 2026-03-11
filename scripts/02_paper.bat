@@ -11,6 +11,12 @@ if errorlevel 1 (
     exit /b 1
 )
 
+if not defined REPO_PYTHON (
+    echo [ERROR] Bootstrap fullforte ikke korrekt ^(REPO_PYTHON mangler^).
+    pause
+    exit /b 1
+)
+
 "%REPO_PYTHON%" -m apps.paper_runner --config configs/active.yaml
 set "EXIT_CODE=%ERRORLEVEL%"
 if not "%EXIT_CODE%"=="0" (

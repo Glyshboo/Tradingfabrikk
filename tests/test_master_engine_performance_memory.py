@@ -71,6 +71,11 @@ def test_engine_updates_memory_from_paper_and_challenger(tmp_path):
     assert comp["memory_sample_count"] > 1
 
 
+def test_engine_paper_mode_does_not_require_user_stream_auth(tmp_path):
+    engine = MasterEngine(_cfg(tmp_path), PaperExecutionAdapter())
+    assert engine.data.require_user_stream_auth is False
+
+
 def test_engine_persists_performance_memory_state(tmp_path):
     cfg = _cfg(tmp_path)
     engine = MasterEngine(cfg, PaperExecutionAdapter())

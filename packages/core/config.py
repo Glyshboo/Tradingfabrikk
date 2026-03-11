@@ -42,8 +42,15 @@ def _validate_config(cfg: Dict[str, Any], path: str) -> None:
 
 
 def load_config(path: str) -> Dict[str, Any]:
-    with pathlib.Path(path).open("r", encoding="utf-8") as f:
-        cfg = yaml.safe_load(f)
+    config_path = pathlib.Path(path)
+    if not config_path.exists():
+        raise ValueError(f"Config file not found: {path}")
+
+    try:
+        with config_path.open("r", encoding="utf-8") as f:
+            cfg = yaml.safe_load(f)
+    except yaml.YAMLError as exc:
+        raise ValueError(f"Invalid YAML in config {path}: {exc}") from exc
     if not isinstance(cfg, dict):
         raise ValueError(f"Invalid config {path}: expected top-level mapping")
     _validate_config(cfg, path)

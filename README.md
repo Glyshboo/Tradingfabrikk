@@ -16,6 +16,8 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
+> Windows paper/research quickstart: du kan kjøre `scripts\02_paper.bat` eller `scripts\03_research.bat` direkte på en fersk maskin med Python installert. Scriptet oppretter automatisk `.venv` i repo-root og installerer/oppdaterer dependencies fra `requirements.txt` før app-start.
+
 ## Kjøring
 ### Recommended workflow (standard)
 Den anbefalte standardløypa er **manuell LLM roundtrip** (ingen intern LLM-API):
@@ -142,7 +144,12 @@ Eksportfiler refreshes også automatisk via `exports`-config: etter research/aut
 
 Windows launcher notes:
 - Alle `.bat` launchere bytter nå alltid working directory til repo root (`cd /d "%~dp0.."`), så de fungerer ved dobbelklikk fra Windows Explorer.
-- Launcherne foretrekker lokal virtualenv (`.venv\Scripts\python.exe`) når den finnes, og fallbacker ellers til `python` i PATH.
+- `02_paper.bat` og `03_research.bat` kjører en felles bootstrap (`scripts/_bootstrap_python_env.bat`) som:
+  - finner Python (`py -3` eller `python`)
+  - oppretter `.venv` automatisk hvis den mangler
+  - installerer dependencies fra `requirements.txt`
+  - verifiserer at kritiske pakker (bl.a. `PyYAML`/`yaml`) finnes før oppstart
+- Dermed fungerer paper/research uten Binance API-nøkler og uten manuell `pip install` ved førstegangskjøring.
 - Direkte-launchere pauser ved feil (ikke ved normal avslutning), og `04_all.bat` holder hvert vindu åpent med tydelig feilmelding hvis en prosess feiler tidlig i oppstart.
 
 ## Runbooks

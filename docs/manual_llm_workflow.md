@@ -8,6 +8,15 @@ Kort flyt:
 3. Bruker copy-paster `paste_to_llm.md` inn i en LLM manuelt
 4. Bruker sender LLM-svaret tilbake til Codex for trygg implementasjon
 
+## Operator-notat (Lab mode)
+Anbefalt inngang for daglig drift er `scripts\11_lab_mode.bat` (paper-first).
+
+Husk to viktige tolkninger:
+- `03_research.bat` er en batch-jobb som kjører ett pass og avslutter med vilje.
+- `pending = 0` i review betyr ikke nødvendigvis at systemet er idle; kandidater kan fortsatt være i incubation/challenger eller vente på revalidation.
+
+Bruk `scripts\05_status.bat` for samlet operator-dashboard med pipeline-tellinger og export-freshness.
+
 
 ## Automatisk refresh (nytt)
 

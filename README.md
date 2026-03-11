@@ -18,6 +18,23 @@ pip install -r requirements.txt
 
 > Windows paper/research quickstart: du kan kjøre `scripts\02_paper.bat` eller `scripts\03_research.bat` direkte på en fersk maskin med Python installert. Scriptet oppretter automatisk `.venv` i repo-root og installerer/oppdaterer dependencies fra `requirements.txt` før app-start.
 
+## 👑 Lord Heibø operator quickstart (anbefalt)
+Bruk **`scripts\11_lab_mode.bat`** som hovedinngang for standard lab-workflow.
+
+Lab mode er **paper-first og trygg**:
+- Starter ikke live skjult
+- Gir tydelige valg: paper, research-pass, status monitor, review UI, exports
+- Samler operatøropplevelsen i én tydelig inngang
+
+Standardflyt:
+1. Start `11_lab_mode.bat`
+2. Kjør paper engine kontinuerlig
+3. Kjør research ved behov som batch-pass
+4. Følg pipeline i status/review
+5. Bruk `runtime/llm_exports/paste_to_llm.md` for manuell LLM workflow
+
+**Viktig:** live operasjon er separat og bevisst via `scripts\01_live.bat` + `LIVE_CHECKLIST.md`.
+
 ## Kjøring
 ### Recommended workflow (standard)
 Den anbefalte standardløypa er **manuell LLM roundtrip** (ingen intern LLM-API):
@@ -41,11 +58,11 @@ Windows:
 scripts\02_paper.bat
 ```
 
-Sjekk status (mode, symbols, open positions, last decision, ws status, account sync health, regime per symbol, risk caps):
+Sjekk operator-status (leselig dashboard i watch-mode):
 ```bat
 scripts\05_status.bat
 ```
-Status-output inkluderer også `score_components` per kandidat for forklarbar seleksjon og et sammendrag av kandidat-registerets state machine.
+Status forklarer nå tydelig forskjellen på kontinuerlig paper og batch-basert research, viser pipeline-counts (inkl. challenger/incubation/revalidation), review-queue og export freshness.
 
 ### Going Live (Safe)
 Live krever eksplisitt `mode: live` + egne API keys i miljø. `live_runner` nekter oppstart hvis config ikke er live.
@@ -140,6 +157,7 @@ Eksportfiler refreshes også automatisk via `exports`-config: etter research/aut
 - `scripts/06_self_check.bat`
 - `scripts/09_review_candidates.bat`
 - `scripts/10_strategy_ideas_status.bat`
+- `scripts/11_lab_mode.bat`
 - `scripts/99_stop_all.bat`
 
 Windows launcher notes:

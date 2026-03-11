@@ -17,7 +17,7 @@ HTML = """
 <!doctype html>
 <html>
 <head>
-  <meta charset=\"utf-8\" />
+  <meta charset="utf-8" />
   <title>Tradingfabrikk Review Panel</title>
   <style>
     body { font-family: Arial, sans-serif; margin: 24px; background:#f6f8fb; }
@@ -30,14 +30,44 @@ HTML = """
   </style>
 </head>
 <body>
-<h1>Unified Candidate Review</h1>
-<div id=\"meta\"></div>
-<div id=\"candidates\"></div>
+<h1>👑 Lord Heibø Candidate Review</h1>
+<div class="card"> 
+  <div class='row'>
+    <button onclick="loadCandidates()">Refresh now</button>
+    <span id="auto" class="pill">auto-refresh: every 10s</span>
+    <span id="updated" class="pill">last update: -</span>
+  </div>
+  <div id="meta"></div>
+  <div id="explain" style="margin-top:8px"></div>
+</div>
+<div id="candidates"></div>
 <script>
 async function loadCandidates(){
   const res = await fetch('/api/candidates');
   const data = await res.json();
-  document.getElementById('meta').innerText = `Pending: ${data.pending.length}`;
+  const p = data.pending.length;
+  const c = data.registry_counts || {};
+  const incubation = (c.paper_smoke_running || 0) + (c.challenger_active || 0) + (c.challenger_evaluated || 0) + (c.paper_candidate_active || 0) + (c.paper_candidate_winning || 0) + (c.paper_candidate_fading || 0);
+  const revalidation = c.needs_revalidation || 0;
+
+  document.getElementById('meta').innerText = `Pending review: ${p} | incubation/challenger: ${incubation} | needs_revalidation: ${revalidation}`;
+
+  let msg = '';
+  if (p === 0 && incubation > 0) {
+    msg = 'Pending = 0 betyr ikke at ingenting skjer: kandidater er fortsatt i incubation/challenger.';
+  } else if (p === 0 && revalidation > 0) {
+    msg = 'Pending = 0 fordi kandidater venter på revalidation før de blir review-klare.';
+  } else if (p === 0 && (data.registry_total || 0) === 0) {
+    msg = 'Review er tom fordi ingen kandidater er generert ennå. Kjør research-pass først.';
+  } else if (p === 0) {
+    msg = 'Review queue er tom akkurat nå.';
+  } else {
+    msg = 'Kandidater er klare for review og kan godkjennes/holdes/rejektes.';
+  }
+  document.getElementById('explain').innerText = msg;
+
+  document.getElementById('updated').innerText = `last update: ${new Date().toLocaleTimeString()}`;
+
   const root = document.getElementById('candidates');
   root.innerHTML = '';
   for (const c of data.pending){
@@ -84,10 +114,12 @@ async function act(candidateId, action){
   await loadCandidates();
 }
 loadCandidates();
+setInterval(loadCandidates, 10000);
 </script>
 </body>
 </html>
 """
+
 
 
 class ReviewHandler(BaseHTTPRequestHandler):
@@ -118,7 +150,12 @@ class ReviewHandler(BaseHTTPRequestHandler):
             self._send(HTTPStatus.OK, HTML, content_type="text/html; charset=utf-8")
             return
         if parsed.path == "/api/candidates":
-            self._send(HTTPStatus.OK, {"pending": self._pending()})
+            report = self.registry.report()
+            self._send(HTTPStatus.OK, {
+                "pending": self._pending(),
+                "registry_counts": report.get("counts", {}),
+                "registry_total": report.get("total", 0),
+            })
             return
         if parsed.path == "/api/candidate":
             query = parse_qs(parsed.query)

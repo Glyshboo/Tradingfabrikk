@@ -34,6 +34,12 @@ def _load_yaml_or_config(path: str) -> dict:
     return parsed
 
 
+def _write_research_run_file(payload: dict, path: str = "runtime/research_last_run.json") -> None:
+    out = pathlib.Path(path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+
 def run_research(
     *,
     config_path: str,
@@ -48,6 +54,11 @@ def run_research(
     trigger_reasons: list[str] | None = None,
     trigger_context: dict | None = None,
 ) -> dict:
+    started_ts = time.time()
+    print("=" * 72)
+    print("🧠 Tradingfabrikk Research Runner (batch mode)")
+    print("This job runs one research pass, writes artifacts, then exits.")
+    print("=" * 72)
     active_cfg = load_config(config_path)
     space = _load_yaml_or_config(space_path)
 
@@ -202,6 +213,29 @@ def run_research(
         trigger="research_runner",
         context={"generated_candidates": total_candidates, "trigger_source": trigger_source},
     )
+    completed_ts = time.time()
+    summary["research_run"] = {
+        "failed": False,
+        "started_ts": started_ts,
+        "completed_ts": completed_ts,
+        "duration_sec": round(completed_ts - started_ts, 3),
+        "generated_candidates": total_candidates,
+        "artifact_root": str(artifact_root),
+        "review_ready": summary.get("candidate_registry", {}).get("counts", {}).get("ready_for_review", 0),
+        "needs_revalidation": summary.get("candidate_registry", {}).get("counts", {}).get("needs_revalidation", 0),
+    }
+    _write_research_run_file(summary["research_run"])
+
+    print()
+    print(f"Artifacts written to: {artifact_root}")
+    if total_candidates == 0:
+        print("No candidates were generated in this batch pass.")
+    else:
+        print(
+            "Batch complete. Candidates now move through incubation/challenger before review."
+        )
+    print(f"Ready for review now: {summary['research_run']['review_ready']}")
+    print("Research runner is batch-based and exits after one pass by design.")
     print(json.dumps(summary, indent=2))
     return summary
 
@@ -217,16 +251,30 @@ def main() -> None:
     parser.add_argument("--end-ts", type=int, default=None)
     parser.add_argument("--strategy-families", default="")
     args = parser.parse_args()
-    run_research(
-        config_path=args.config,
-        space_path=args.space,
-        samples=args.samples,
-        symbols_arg=args.symbols,
-        regimes_arg=args.regimes,
-        start_ts=args.start_ts,
-        end_ts=args.end_ts,
-        strategy_families_arg=args.strategy_families,
-    )
+    try:
+        run_research(
+            config_path=args.config,
+            space_path=args.space,
+            samples=args.samples,
+            symbols_arg=args.symbols,
+            regimes_arg=args.regimes,
+            start_ts=args.start_ts,
+            end_ts=args.end_ts,
+            strategy_families_arg=args.strategy_families,
+        )
+    except Exception as exc:
+        failed_payload = {
+            "failed": True,
+            "started_ts": time.time(),
+            "completed_ts": time.time(),
+            "duration_sec": 0.0,
+            "generated_candidates": 0,
+            "error": str(exc),
+            "artifact_root": "runtime/review_artifacts",
+        }
+        _write_research_run_file(failed_payload)
+        print(f"Research failed: {exc}")
+        raise
 
 
 if __name__ == "__main__":

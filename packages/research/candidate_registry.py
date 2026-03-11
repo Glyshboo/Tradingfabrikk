@@ -4,6 +4,9 @@ import json
 import pathlib
 import time
 from dataclasses import dataclass
+from json import JSONDecodeError
+
+from packages.telemetry.logging_utils import log_event
 
 
 STATES = [
@@ -51,8 +54,30 @@ class CandidateRegistry:
         if not self.path.exists():
             self.path.write_text(json.dumps({"candidates": {}}, indent=2), encoding="utf-8")
 
+    def _default_payload(self) -> dict:
+        return {"candidates": {}}
+
     def _load(self) -> dict:
-        return json.loads(self.path.read_text(encoding="utf-8"))
+        try:
+            payload = json.loads(self.path.read_text(encoding="utf-8"))
+        except JSONDecodeError:
+            log_event("runtime_json_invalid", {"file": str(self.path), "fallback": "candidate_registry_default"})
+            payload = self._default_payload()
+            self._save(payload)
+            return payload
+        except OSError as exc:
+            log_event("runtime_json_read_error", {"file": str(self.path), "error": str(exc), "fallback": "candidate_registry_default"})
+            payload = self._default_payload()
+            self._save(payload)
+            return payload
+        if not isinstance(payload, dict):
+            log_event("runtime_json_invalid", {"file": str(self.path), "fallback": "candidate_registry_default"})
+            payload = self._default_payload()
+            self._save(payload)
+            return payload
+        if not isinstance(payload.get("candidates"), dict):
+            payload["candidates"] = {}
+        return payload
 
     def _save(self, payload: dict) -> None:
         self.path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
@@ -199,7 +224,7 @@ class CandidateRegistry:
         data = self._load()
         counts = {s: 0 for s in STATES}
         for row in data["candidates"].values():
-            if row["state"] in counts:
+            if row.get("state") in counts:
                 counts[row["state"]] += 1
         newest = sorted(
             [{

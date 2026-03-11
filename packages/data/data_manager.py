@@ -8,6 +8,7 @@ import pathlib
 import time
 from collections import defaultdict, deque
 from datetime import datetime, timezone
+from json import JSONDecodeError
 from typing import Any, Dict, Iterable
 from urllib import parse, request
 
@@ -39,6 +40,7 @@ class DataManager:
         self.rest_base_url = rest_base_url.rstrip("/")
         self.ws_base_url = ws_base_url.rstrip("/")
         self.require_user_stream_auth = require_user_stream_auth
+        self._user_stream_disabled_logged = False
         self.cache_dir = pathlib.Path(cache_dir)
         self.cache_dir.mkdir(parents=True, exist_ok=True)
 
@@ -80,8 +82,11 @@ class DataManager:
                 self._market_reconnect_delay_sec = min(30, self._market_reconnect_delay_sec * 2)
 
     async def run_user_stream(self) -> None:
-        if not self.api_key and not self.require_user_stream_auth:
+        if not self.require_user_stream_auth:
             self.user_stream_alive = True
+            if not self._user_stream_disabled_logged:
+                log_event("user_stream_disabled", {"reason": "paper_mode_auth_not_required"})
+                self._user_stream_disabled_logged = True
             while True:
                 await asyncio.sleep(5)
 
@@ -490,7 +495,17 @@ class DataManager:
         state_file = pathlib.Path(path)
         if not state_file.exists():
             return
-        payload = json.loads(state_file.read_text(encoding="utf-8"))
+        try:
+            payload = json.loads(state_file.read_text(encoding="utf-8"))
+        except JSONDecodeError:
+            log_event("runtime_json_invalid", {"file": str(state_file), "fallback": "empty_data_state"})
+            return
+        except OSError as exc:
+            log_event("runtime_json_read_error", {"file": str(state_file), "error": str(exc), "fallback": "empty_data_state"})
+            return
+        if not isinstance(payload, dict):
+            log_event("runtime_json_invalid", {"file": str(state_file), "fallback": "empty_data_state"})
+            return
         self.account_state.update(payload.get("account_state", {}))
         for sym, rows in payload.get("candles", {}).items():
             if sym in self.candles:
@@ -538,7 +553,14 @@ class DataManager:
 
         cache_file = self.cache_dir / f"{symbol}_{interval}_{start_ts or 0}_{end_ts or 0}_{bars}.json"
         if cache_file.exists():
-            payload = json.loads(cache_file.read_text(encoding="utf-8"))
+            try:
+                payload = json.loads(cache_file.read_text(encoding="utf-8"))
+            except (JSONDecodeError, OSError) as exc:
+                log_event("historical_cache_invalid", {"file": str(cache_file), "error": str(exc), "action": "redownload"})
+                payload = self._download_klines(symbol, interval=interval, start_ts=start_ts, end_ts=end_ts, limit=bars)
+                if not payload:
+                    return []
+                cache_file.write_text(json.dumps(payload), encoding="utf-8")
         else:
             payload = self._download_klines(symbol, interval=interval, start_ts=start_ts, end_ts=end_ts, limit=bars)
             if not payload:

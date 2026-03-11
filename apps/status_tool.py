@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import pathlib
+from json import JSONDecodeError
 
 from packages.research.candidate_registry import CandidateRegistry
 
@@ -16,7 +17,11 @@ def main() -> None:
     if not p.exists():
         print("No status file found")
         return
-    status = json.loads(p.read_text(encoding="utf-8"))
+    try:
+        status = json.loads(p.read_text(encoding="utf-8"))
+    except (JSONDecodeError, OSError):
+        print("Status file is empty or invalid JSON")
+        return
     last_decision = status.get("last_decision") or {}
     decision_view = {
         "symbol": last_decision.get("symbol"),

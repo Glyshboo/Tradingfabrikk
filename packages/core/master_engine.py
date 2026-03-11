@@ -4,6 +4,7 @@ import asyncio
 import json
 import pathlib
 import time
+from json import JSONDecodeError
 from collections import Counter
 
 from packages.core.candidate_runtime import CandidateRuntimeOverlayManager
@@ -1146,7 +1147,16 @@ class MasterEngine:
     def _write_status(self, state: str) -> None:
         llm_cfg = self.cfg.get("llm_research") or self.cfg.get("llm", {})
         budget_path = pathlib.Path(llm_cfg.get("budget_file", "runtime/llm_budget.json"))
-        budget_history = json.loads(budget_path.read_text(encoding="utf-8")).get("calls", []) if budget_path.exists() else []
+        budget_history: list[dict] = []
+        if budget_path.exists():
+            try:
+                budget_payload = json.loads(budget_path.read_text(encoding="utf-8"))
+                if isinstance(budget_payload, dict):
+                    calls = budget_payload.get("calls", [])
+                    if isinstance(calls, list):
+                        budget_history = calls
+            except (JSONDecodeError, OSError) as exc:
+                log_event("runtime_json_invalid", {"file": str(budget_path), "error": str(exc), "fallback": "empty_budget_history"})
         now = time.time()
         budget_runtime = {
             "used_day": sum(1 for row in budget_history if now - float(row.get("ts", 0)) <= 86400),

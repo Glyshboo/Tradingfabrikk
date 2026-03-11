@@ -150,6 +150,8 @@ Windows launcher notes:
   - installerer dependencies fra `requirements.txt`
   - verifiserer at kritiske pakker (bl.a. `PyYAML`/`yaml`) finnes før oppstart
 - Dermed fungerer paper/research uten Binance API-nøkler og uten manuell `pip install` ved førstegangskjøring.
+- Runtime state-filer (`runtime/candidates_registry.json`, `runtime/review_queue.json`, `runtime/engine_state.json`, `runtime/data_state.json`) tåler nå manglende/tomme/korrupt JSON ved oppstart: systemet logger en kort warning og faller tilbake til trygg default i stedet for å krasje.
+- Paper mode forsøker ikke Binance private user stream/listen key. Binance API-nøkler er derfor ikke påkrevd for standard `02_paper.bat` / `03_research.bat` oppstart.
 - Direkte-launchere pauser ved feil (ikke ved normal avslutning), og `04_all.bat` holder hvert vindu åpent med tydelig feilmelding hvis en prosess feiler tidlig i oppstart.
 
 ## Runbooks
